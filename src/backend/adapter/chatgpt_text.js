@@ -28,17 +28,27 @@ const INPUT_SELECTOR = '.ProseMirror';
  */
 async function selectModel(page, codeName, meta = {}) {
     try {
-        // 1. 点击 Model selector 按钮
-        const modelSelectorBtn = page.getByRole('button', { name: /^Model selector/ });
-        const btnExists = await modelSelectorBtn.count();
-        if (btnExists === 0) {
-            logger.debug('适配器', '未找到模型选择器按钮，跳过选择模型', meta);
+        // 1. 点击模型选择按钮。ChatGPT 网页经常改 aria-label，优先用 data-testid，再回退到可见文本。
+        const candidates = [
+            page.locator('[data-testid="model-switcher-dropdown-button"]'),
+            page.getByRole('button', { name: /Model selector|models?|ChatGPT|GPT|Instant|Thinking|Pro/i }),
+            page.locator('button').filter({ hasText: /ChatGPT|GPT|Instant|Thinking|Pro/i })
+        ];
+        let modelSelectorBtn = null;
+        for (const candidate of candidates) {
+            if (await candidate.count().catch(() => 0)) {
+                modelSelectorBtn = candidate.first();
+                break;
+            }
+        }
+        if (!modelSelectorBtn) {
+            logger.warn('适配器', '未找到模型选择器按钮，跳过选择模型', meta);
             return false;
         }
 
         await modelSelectorBtn.waitFor({ timeout: 5000 });
         await safeClick(page, modelSelectorBtn, { bias: 'button' });
-        await sleep(300, 500);
+        await sleep(500, 800);
 
         // 2. 检查是否有 Legacy models 选项
         const legacyMenuItem = page.getByRole('menuitem', { name: /^Legacy models/ });
@@ -239,6 +249,91 @@ async function generate(context, prompt, imgPaths, modelId, meta = {}) {
             const pageError = normalizePageError(e, meta);
             if (pageError) return pageError;
             throw e;
+        }
+
+        if (!textContent || textContent.trim() === '') {
+            logger.warn('适配器', 'SSE 未解析到文本，尝试 DOM 回退提取...', meta);
+            try {
+                const domWaitTimeout = Math.min(waitTimeout, 60000);
+                const extractAssistantText = () => {
+                    const rejectExact = new Set(['Thinking', 'Instant', 'Pro', 'ChatGPT']);
+                    const clean = (value) => (value || '')
+                        .replace(/^ChatGPT said:\s*/i, '')
+                        .replace(/\u00a0/g, ' ')
+                        .trim();
+                    const acceptable = (value) => {
+                        const text = clean(value);
+                        if (!text || rejectExact.has(text)) return '';
+                        if (/^(Thinking|Instant|Pro)\s*$/i.test(text)) return '';
+                        if (/^\d+\s*\/\s*\d+$/.test(text)) return '';
+                        return text;
+                    };
+
+                    const nodes = Array.from(document.querySelectorAll('[data-message-author-role="assistant"]'));
+                    for (let i = nodes.length - 1; i >= 0; i--) {
+                        const node = nodes[i];
+                        const preferred = Array.from(node.querySelectorAll('.markdown, .prose, [data-message-content-part]'));
+                        for (let j = preferred.length - 1; j >= 0; j--) {
+                            const text = acceptable(preferred[j].innerText || preferred[j].textContent);
+                            if (text) return text;
+                        }
+
+                        const lines = clean(node.innerText || node.textContent)
+                            .split('\n')
+                            .map(line => clean(line))
+                            .filter(Boolean)
+                            .filter(line => !rejectExact.has(line));
+                        const text = acceptable(lines.join('\n'));
+                        if (text) return text;
+                    }
+                    return '';
+                };
+
+                const isGenerating = () => {
+                    const text = document.body.innerText || '';
+                    if (/Thinking\.\.\.|Thinking…|正在思考|思考中/.test(text)) return true;
+                    const buttons = Array.from(document.querySelectorAll('button'));
+                    return buttons.some((button) => {
+                        const label = `${button.getAttribute('aria-label') || ''} ${button.innerText || button.textContent || ''}`;
+                        return /stop generating|stop streaming|停止生成|停止回答|cancel/i.test(label);
+                    });
+                };
+
+                await page.waitForFunction(extractAssistantText, null, { timeout: domWaitTimeout }).catch(() => { });
+
+                let domText = '';
+                let lastText = '';
+                let stableCount = 0;
+                const stableStartedAt = Date.now();
+                while (Date.now() - stableStartedAt < domWaitTimeout) {
+                    const currentText = await page.evaluate(extractAssistantText);
+                    const generating = await page.evaluate(isGenerating).catch(() => false);
+                    if (currentText && currentText === lastText && !generating) {
+                        stableCount++;
+                    } else {
+                        stableCount = 0;
+                        lastText = currentText || lastText || '';
+                    }
+
+                    if (lastText && !generating && stableCount >= 8) {
+                        domText = lastText;
+                        break;
+                    }
+
+                    await sleep(1200, 1600);
+                }
+
+                if (!domText) {
+                    domText = lastText || await page.evaluate(extractAssistantText);
+                }
+
+                if (domText && domText.trim()) {
+                    textContent = domText.trim();
+                    logger.info('适配器', `DOM 回退提取文本成功 (${textContent.length} 字符)`, meta);
+                }
+            } catch (e) {
+                logger.warn('适配器', `DOM 回退提取失败: ${e.message}`, meta);
+            }
         }
 
         if (!textContent || textContent.trim() === '') {
