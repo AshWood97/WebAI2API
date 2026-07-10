@@ -79,6 +79,7 @@ backend:
             #   zenmux_ai_text         (ZenMux 文本生成)
             #   chatgpt                (ChatGPT 图片生成)
             #   chatgpt_text           (ChatGPT 文本生成)
+            #   claude_text            (Claude.ai 文本生成)
             #   sora                   (Sora 视频生成)
             #   deepseek_text          (DeepSeek 文本生成)
             #   doubao                 (豆包 图片生成)
