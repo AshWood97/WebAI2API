@@ -282,6 +282,28 @@ export class PoolManager {
     }
 
     /**
+     * Return only the scheduling data needed by a deployment controller.  This
+     * deliberately excludes pages, browser handles and cookies, so status can
+     * be exposed through the already authenticated Admin API.
+     */
+    getRuntimeStatus() {
+        const workers = this.workers.map(worker => ({
+            name: worker.name,
+            instance: worker.instanceName,
+            busy: worker.busyCount
+        }));
+        const busyWorkers = workers.filter(worker => worker.busy > 0);
+        return {
+            initialized: this.initialized,
+            workers,
+            workerCount: workers.length,
+            busyWorkers,
+            busyCount: busyWorkers.reduce((total, worker) => total + worker.busy, 0),
+            browserCount: new Set(this.workers.map(worker => worker.browser).filter(Boolean)).size
+        };
+    }
+
+    /**
      * 获取图片策略（宽松策略：只要有一个 Worker 支持 optional 就返回 optional）
      */
     getImagePolicy(modelKey) {

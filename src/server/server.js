@@ -110,6 +110,27 @@ const mediaManager = new MediaManager({
     getWorkerCookies: async (workerName, domain) => await queueManager.getWorkerCookies(workerName, domain)
 });
 
+function getRuntimeStatus() {
+    const queue = queueManager.getStatus();
+    const pool = backend.getPoolManager()?.getRuntimeStatus() || {
+        initialized: false,
+        workerCount: 0,
+        busyCount: 0,
+        busyWorkers: [],
+        browserCount: 0
+    };
+    const media = mediaManager.getRuntimeStatus();
+    const safe = safeMode;
+    return {
+        ready: !safe,
+        idle: !safe && queue.total === 0 && pool.busyCount === 0 && media.idle,
+        queue,
+        pool,
+        media,
+        safeMode: { enabled: safe, reason: safeModeReason }
+    };
+}
+
 // ==================== 创建路由 ====================
 
 /**
@@ -139,7 +160,8 @@ const handleRequest = createGlobalRouter({
     mediaManager,
     config,
     loginMode: isLoginMode,
-    getSafeMode: () => ({ enabled: safeMode, reason: safeModeReason })
+    getSafeMode: () => ({ enabled: safeMode, reason: safeModeReason }),
+    getRuntimeStatus
 });
 
 // ==================== 启动服务器 ====================

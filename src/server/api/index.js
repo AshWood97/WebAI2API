@@ -36,14 +36,14 @@ const WEBUI_DIR = path.join(process.cwd(), 'webui', 'dist');
  * @returns {Function} 请求处理函数
  */
 export function createGlobalRouter(context) {
-    const { authToken, config, queueManager, tempDir, loginMode, getSafeMode } = context;
+    const { authToken, config, queueManager, tempDir, loginMode, getSafeMode, getRuntimeStatus } = context;
 
     // 创建鉴权中间件
     const checkAuth = createAuthMiddleware(authToken);
 
     // 创建子路由处理器
     const handleOpenAIRequest = loginMode ? null : createOpenAIRouter(context);
-    const handleAdminRequest = createAdminRouter({ config, queueManager, tempDir, getSafeMode });
+    const handleAdminRequest = createAdminRouter({ config, queueManager, tempDir, getSafeMode, getRuntimeStatus });
 
     /**
      * 主路由处理函数

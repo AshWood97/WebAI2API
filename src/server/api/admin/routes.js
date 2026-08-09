@@ -73,7 +73,7 @@ async function readBody(req) {
  * @returns {Function} Admin 路由处理函数
  */
 export function createAdminRouter(context) {
-    const { config, queueManager, tempDir, getSafeMode } = context;
+    const { config, queueManager, tempDir, getSafeMode, getRuntimeStatus } = context;
 
     /**
      * Admin 路由处理函数
@@ -92,6 +92,13 @@ export function createAdminRouter(context) {
                 const status = getSystemStatus();
                 const safeMode = getSafeMode?.() || { enabled: false, reason: null };
                 sendJson(res, 200, { ...status, safeMode });
+                return;
+            }
+
+            // GET /admin/omninode-status - deployment gate, protected by the
+            // normal Admin API bearer check performed by the global router.
+            if (method === 'GET' && pathname === '/omninode-status') {
+                sendJson(res, 200, getRuntimeStatus?.() || { ready: false, idle: false });
                 return;
             }
 

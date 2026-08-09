@@ -102,6 +102,20 @@ export class MediaManager {
         return this.store.getJob(id);
     }
 
+    /**
+     * Status suitable for a rolling deployment gate.  The job metadata remains
+     * private; callers only learn whether it is safe to restart the module.
+     */
+    getRuntimeStatus() {
+        const recoverableJobs = this.store.listRecoverableJobs();
+        return {
+            runningCount: this.running.size,
+            recoverableCount: recoverableJobs.length,
+            recoverableJobIds: recoverableJobs.map(job => job.id),
+            idle: this.running.size === 0 && recoverableJobs.length === 0
+        };
+    }
+
     formatJob(job, basePath = '/v1') {
         if (!job) return null;
         const output = job.outputs[0] || null;

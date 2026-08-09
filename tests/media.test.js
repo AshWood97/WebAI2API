@@ -39,6 +39,27 @@ test('media jobs are idempotent and persist data-url output outside SQLite', asy
     assert.equal((await fs.readFile(manager.getContent(job).absolutePath)).toString(), 'hello');
 });
 
+test('media runtime status blocks deployment while a job is running', async t => {
+    let release;
+    const manager = new MediaManager({
+        dataDir: await tempDataDir(t), logger,
+        mediaConfig: { pollIntervalMs: 5, pollTimeoutMs: 500 },
+        getWorkerCookies: async () => ({ cookies: [] }),
+        executeMedia: async () => await new Promise(resolve => { release = resolve; })
+    });
+    const { job } = manager.createJob('image', { model: 'image-test', prompt: 'hold' });
+    await new Promise(resolve => setImmediate(resolve));
+    assert.equal(manager.getRuntimeStatus().idle, false);
+    release({ image: 'data:image/png;base64,aGVsbG8=' });
+    await manager.running.get(job.id);
+    assert.deepEqual(manager.getRuntimeStatus(), {
+        runningCount: 0,
+        recoverableCount: 0,
+        recoverableJobIds: [],
+        idle: true
+    });
+});
+
 test('pending video jobs poll to completion without duplicating submit', async t => {
     let creates = 0;
     let polls = 0;
