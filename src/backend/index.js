@@ -75,6 +75,16 @@ export function getBackend() {
         },
 
         /**
+         * 创建、轮询或取消异步媒体任务。
+         */
+        executeMedia: async (kind, payload, modelId, meta = {}) => {
+            if (!poolManager) {
+                return { error: 'Pool 未初始化' };
+            }
+            return await poolManager.executeMedia(kind, payload, modelId, meta);
+        },
+
+        /**
          * 获取模型列表
          * @returns {object}
          */

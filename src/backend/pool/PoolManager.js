@@ -231,6 +231,37 @@ export class PoolManager {
     }
 
     /**
+     * 分发异步媒体任务。视频一旦被上游接受就不能对其它 Worker 重试，
+     * 否则会造成重复生成和重复扣费，因此这里只选择一个 Worker 执行。
+     *
+     * @param {'video'|'audio'|'image'} kind
+     * @param {object} payload
+     * @param {string} modelId
+     * @param {object} meta
+     * @returns {Promise<object>}
+     */
+    async executeMedia(kind, payload, modelId, meta = {}) {
+        const candidates = this.workers.filter(worker => worker.supports(modelId));
+        if (candidates.length === 0) {
+            return { error: `没有 Worker 支持模型: ${modelId}` };
+        }
+
+        const worker = this.strategySelector.sort(candidates)[0];
+        logger.debug('工作池', `媒体任务分发至: ${worker.name}`, {
+            ...meta,
+            mediaKind: kind,
+            operation: payload.operation || 'create'
+        });
+
+        try {
+            return await worker.executeMedia(kind, payload, modelId, meta);
+        } catch (err) {
+            logger.error('工作池', `[${worker.name}] 媒体任务异常`, { error: err.message, ...meta });
+            return normalizeError(err.message || '媒体任务执行异常');
+        }
+    }
+
+    /**
      * 获取所有模型列表
      */
     getModels() {
@@ -287,7 +318,10 @@ export class PoolManager {
     async getCookies(instanceName, domain) {
         let worker;
         if (instanceName) {
-            worker = this.workers.find(w => w.instanceName === instanceName);
+            // 兼容既有 instance 名称，也允许媒体下载按实际 Worker 名称取
+            // Cookie，避免把 Cookie 暴露给调用方。
+            worker = this.workers.find(w => w.name === instanceName)
+                || this.workers.find(w => w.instanceName === instanceName);
             if (!worker) {
                 throw new Error(`浏览器实例不存在: ${instanceName}`);
             }

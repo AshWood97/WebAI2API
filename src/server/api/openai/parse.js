@@ -84,6 +84,7 @@ export async function parseRequest(data, options) {
     // 1. 解析模型参数与类型
     let modelKey = null;
     let isTextMode = false;
+    let modelType = 'image';
 
     if (data.model) {
         // 检查模型是否在支持列表中
@@ -95,8 +96,21 @@ export async function parseRequest(data, options) {
             logger.info('服务器', `触发模型: ${data.model}`, { id: requestId });
 
             // 判定是否为文本模式
-            const type = getModelType ? getModelType(data.model) : 'image';
-            isTextMode = type === 'text';
+            modelType = getModelType ? getModelType(data.model) : 'image';
+            isTextMode = modelType === 'text';
+
+            if (modelType === 'video') {
+                return parseError(
+                    ERROR_CODES.INVALID_MODEL,
+                    `模型 ${data.model} 是视频模型，请改用 POST /v1/videos`
+                );
+            }
+            if (modelType === 'audio') {
+                return parseError(
+                    ERROR_CODES.INVALID_MODEL,
+                    `模型 ${data.model} 是音频模型，请改用 POST /v1/audio/generations`
+                );
+            }
 
             if (isTextMode) {
                 logger.info('服务器', '解析模式: 文本对话 (虚拟上下文构建)', { id: requestId });

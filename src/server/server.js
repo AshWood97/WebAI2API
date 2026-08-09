@@ -47,6 +47,7 @@ const {
     name: backendName,
     initBrowser,
     generate,
+    executeMedia,
     TEMP_DIR,
     getModels,
     getImagePolicy,
@@ -95,6 +96,20 @@ const queueManager = createQueueManager(
     }
 );
 
+const { MediaManager } = await import('../media/index.js');
+const mediaManager = new MediaManager({
+    dataDir: process.cwd() + '/data',
+    mediaConfig: config.media || {},
+    logger,
+    executeMedia: async (kind, payload, modelId, meta) => {
+        if (!queueManager.getPoolContext()) {
+            await queueManager.initializePool();
+        }
+        return await executeMedia(kind, payload, modelId, meta);
+    },
+    getWorkerCookies: async (workerName, domain) => await queueManager.getWorkerCookies(workerName, domain)
+});
+
 // ==================== 创建路由 ====================
 
 /**
@@ -121,6 +136,7 @@ const handleRequest = createGlobalRouter({
     tempDir: TEMP_DIR,
     imageLimit: IMAGE_LIMIT,
     queueManager,
+    mediaManager,
     config,
     loginMode: isLoginMode,
     getSafeMode: () => ({ enabled: safeMode, reason: safeModeReason })
@@ -152,6 +168,7 @@ async function startServer() {
     // 预先启动工作池（失败时进入安全模式）
     try {
         await queueManager.initializePool();
+        mediaManager.start();
     } catch (err) {
         logger.error('服务器', '工作池初始化失败', { error: err.message });
         logger.warn('服务器', '进入安全模式：WebUI 和 Admin API 可用，OpenAI API 不可用');

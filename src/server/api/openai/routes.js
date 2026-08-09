@@ -8,6 +8,7 @@ import { logger } from '../../../utils/logger.js';
 import { ERROR_CODES } from '../../errors.js';
 import { sendJson, sendApiError } from '../../respond.js';
 import { parseRequest } from './parse.js';
+import { createMediaRouter } from './mediaRoutes.js';
 
 /**
  * 创建 OpenAI API 路由处理器
@@ -22,8 +23,11 @@ export function createOpenAIRouter(context) {
         getModelType,
         tempDir,
         imageLimit,
-        queueManager
+        queueManager,
+        mediaManager
     } = context;
+
+    const handleMediaRequest = mediaManager ? createMediaRouter({ getModels, mediaManager }) : null;
 
     /**
      * 处理 GET /v1/models
@@ -158,6 +162,11 @@ export function createOpenAIRouter(context) {
      */
     return async function handleOpenAIRequest(req, res, pathname, parsedUrl) {
         const requestId = crypto.randomUUID().slice(0, 8);
+
+        if (handleMediaRequest) {
+            const handled = await handleMediaRequest(req, res, pathname);
+            if (handled !== false) return;
+        }
 
         if (req.method === 'GET' && pathname === '/models') {
             handleModels(res);

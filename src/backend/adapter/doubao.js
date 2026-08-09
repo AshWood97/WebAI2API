@@ -15,6 +15,8 @@ import {
     useContextDownload
 } from '../utils/index.js';
 import { logger } from '../../utils/logger.js';
+import { createVideo, pollVideo, cancelVideo } from './doubao_video.js';
+import { createAudio } from './doubao_audio.js';
 
 // --- 配置常量 ---
 const TARGET_URL = 'https://www.doubao.com/chat/';
@@ -272,8 +274,8 @@ function extractRawImage(sseData) {
  */
 export const manifest = {
     id: 'doubao',
-    displayName: '豆包 (图片生成)',
-    description: '使用字节跳动豆包生成图片，支持多种模型和参考图片上传。需要已登录的豆包账户。',
+    displayName: '豆包 (图片、视频生成)',
+    description: '使用字节跳动豆包生成图片与 Seedance 视频，复用同一登录页面。',
 
     getTargetUrl(config, workerConfig) {
         return TARGET_URL;
@@ -282,10 +284,18 @@ export const manifest = {
     models: [
         { id: 'seedream-4.5', codeName: 'Seedream 4.5', imagePolicy: 'optional' },
         { id: 'seedream-4.0', codeName: 'Seedream 4.0', imagePolicy: 'optional' },
-        { id: 'seedream-5.0-lite', codeName: 'Seedream 5.0 Lite', imagePolicy: 'optional' }
+        { id: 'seedream-5.0-lite', codeName: 'Seedream 5.0 Lite', imagePolicy: 'optional' },
+        { id: 'doubao-video', imagePolicy: 'optional', type: 'video', capabilities: ['text_to_video', 'image_to_video', 'async'] },
+        { id: 'seedance-2.0', imagePolicy: 'optional', type: 'video', capabilities: ['text_to_video', 'image_to_video', 'async'] },
+        { id: 'seedance-2.0-fast', imagePolicy: 'optional', type: 'video', capabilities: ['text_to_video', 'image_to_video', 'async'] },
+        { id: 'doubao-music', imagePolicy: 'forbidden', type: 'audio', capabilities: ['music_generation', 'async'] }
     ],
 
     navigationHandlers: [],
 
-    generate
+    generate,
+    createVideo,
+    pollVideo,
+    cancelVideo,
+    createAudio
 };

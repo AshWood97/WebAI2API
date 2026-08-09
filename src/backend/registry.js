@@ -16,6 +16,9 @@ import { logger } from '../utils/logger.js';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const ADAPTER_DIR = path.join(__dirname, 'adapter');
+// Helper modules live alongside adapters so a provider can share its web
+// protocol implementation without creating another runtime adapter.
+const AUXILIARY_MODULES = new Set(['doubao_audio.js']);
 
 /**
  * 图片输入策略枚举
@@ -79,7 +82,8 @@ class AdapterRegistry {
         //logger.info('注册表', `正在扫描适配器目录: ${ADAPTER_DIR}`);
         logger.info('注册表', `正在扫描适配器目录...`);
 
-        const files = fs.readdirSync(ADAPTER_DIR).filter(f => f.endsWith('.js'));
+        const files = fs.readdirSync(ADAPTER_DIR)
+            .filter(f => f.endsWith('.js') && !AUXILIARY_MODULES.has(f));
 
         for (const file of files) {
             const filePath = path.join(ADAPTER_DIR, file);
@@ -234,7 +238,8 @@ class AdapterRegistry {
                 created: Math.floor(Date.now() / 1000),
                 owned_by: id,
                 image_policy: m.imagePolicy,
-                type: m.type || 'image'
+                type: m.type || 'image',
+                capabilities: m.capabilities || []
             }));
 
         return { object: 'list', data };
@@ -299,7 +304,7 @@ class AdapterRegistry {
      * 获取模型的类型
      * @param {string} adapterId - 适配器 ID
      * @param {string} modelKey - 模型 key
-     * @returns {string} 'text' | 'image'
+     * @returns {string} 'text' | 'image' | 'video' | 'audio'
      */
     getModelType(adapterId, modelKey) {
         const adapter = this.getAdapter(adapterId);
@@ -327,7 +332,8 @@ class AdapterRegistry {
                         created: Math.floor(Date.now() / 1000),
                         owned_by: id,
                         image_policy: m.imagePolicy,
-                        type: m.type || 'image'
+                        type: m.type || 'image',
+                        capabilities: m.capabilities || []
                     });
                 }
             }

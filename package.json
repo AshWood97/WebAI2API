@@ -7,6 +7,7 @@
 	"type": "module",
 	"scripts": {
 		"start": "node supervisor.js",
+		"test": "node --test tests/*.test.js",
 		"genkey": "node scripts/genkey.js",
 		"init": "node scripts/init.js",
 		"postinstall": "node scripts/postinstall.js"

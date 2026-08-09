@@ -9,6 +9,10 @@ import { initBrowserBase, createCursor } from '../engine/launcher.js';
 import { registry } from '../registry.js';
 import { tryGotoWithCheck } from '../utils/page.js';
 
+function capitalize(value) {
+    return value ? value[0].toUpperCase() + value.slice(1) : value;
+}
+
 /**
  * Worker 类 - 封装单个浏览器实例
  */
@@ -35,6 +39,12 @@ export class Worker {
         this.page = null;
         this.busyCount = 0;
         this.initialized = false;
+
+        // 同一网页标签不能同时执行两次自动化操作。此前 busyCount 仅用于调度
+        // 指标，多个请求仍可能同时改写输入框或等待同一个 SSE 响应。
+        // 这里使用一个轻量 Promise 队列，保证每个 Worker/page 串行；不同
+        // Worker 的不同页面仍可并行。
+        this._pageExecutionTail = Promise.resolve();
 
         // 浏览器所有权（用于共享浏览器场景的协调重启）
         this._isBrowserOwner = false;  // 是否是浏览器的所有者（负责重启）
@@ -493,7 +503,102 @@ export class Worker {
         this.busyCount++;
         try {
             // 传递原始 modelId，由适配器自己解析
-            return await adapter.generate(subContext, prompt, paths, modelId, enrichedMeta);
+            return await this._withPageLock(() => adapter.generate(
+                subContext,
+                prompt,
+                paths,
+                modelId,
+                enrichedMeta
+            ));
+        } finally {
+            this.busyCount--;
+        }
+    }
+
+    /**
+     * 在当前页面上串行执行任务。
+     * @private
+     * @param {() => Promise<any>} operation
+     * @returns {Promise<any>}
+     */
+    async _withPageLock(operation) {
+        const previous = this._pageExecutionTail;
+        let release;
+        this._pageExecutionTail = new Promise(resolve => {
+            release = resolve;
+        });
+
+        await previous;
+        try {
+            return await operation();
+        } finally {
+            release();
+        }
+    }
+
+    /**
+     * 执行异步媒体任务。适配器可选实现 createVideo/pollVideo/cancelVideo、
+     * createAudio 或 createImage；图片未提供专用接口时回退到既有 generate。
+     *
+     * @param {'video'|'audio'|'image'} kind
+     * @param {object} payload
+     * @param {string} modelId
+     * @param {object} meta
+     * @returns {Promise<object>}
+     */
+    async executeMedia(kind, payload, modelId, meta = {}) {
+        if (!this.supports(modelId)) {
+            return { error: `Worker [${this.name}] 不支持模型: ${modelId}` };
+        }
+
+        if (!this.initialized || !this.page || this.page.isClosed()) {
+            try {
+                await this._reinit();
+            } catch (e) {
+                return { error: `Worker 重新初始化失败: ${e.message}` };
+            }
+        }
+
+        const type = this._getAdapterType(modelId);
+        const actualModelId = modelId.includes('/') ? modelId.split('/', 2)[1] : modelId;
+        const adapter = registry.getAdapter(type);
+        if (!adapter) return { error: `适配器不存在: ${type}` };
+
+        const subContext = {
+            page: this.page,
+            config: this.globalConfig,
+            proxyConfig: this.proxyConfig,
+            userDataDir: this.userDataDir,
+            workerName: this.name,
+            instanceName: this.instanceName
+        };
+        const operation = payload.operation || 'create';
+        const methodName = operation === 'poll'
+            ? `poll${capitalize(kind)}`
+            : operation === 'cancel'
+                ? `cancel${capitalize(kind)}`
+                : `create${capitalize(kind)}`;
+
+        this.busyCount++;
+        try {
+            return await this._withPageLock(async () => {
+                const enrichedMeta = { ...meta, adapter: type, model: actualModelId, mediaKind: kind, operation };
+                let result;
+                if (typeof adapter[methodName] === 'function') {
+                    result = await adapter[methodName](subContext, payload, actualModelId, enrichedMeta);
+                } else if (kind === 'image' && operation === 'create') {
+                    result = await adapter.generate(
+                        subContext,
+                        payload.prompt,
+                        payload.inputPaths || [],
+                        actualModelId,
+                        enrichedMeta
+                    );
+                } else {
+                    result = { error: `适配器 ${type} 未实现 ${methodName}` };
+                }
+                return { ...(result || {}), workerName: this.name, adapter: type };
+            });
         } finally {
             this.busyCount--;
         }

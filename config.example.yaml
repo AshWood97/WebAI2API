@@ -84,8 +84,14 @@ backend:
             #   deepseek_text          (DeepSeek 文本生成)
             #   doubao                 (豆包 图片生成)
             #   doubao_text            (豆包 文本生成)
+            #   doubao_video           (豆包 Seedance 异步视频生成；低内存服务器建议复用 doubao Worker)
             #   test                   (浏览器检测，仅供调试使用)
             type: lmarena              # 适配器类型
+
+          # 如需把视频放入独立标签页，可添加下列 Worker。低内存服务器可不添加：
+          # doubao Worker 已内置 doubao-video / Seedance 模型，并以同一页面串行执行。
+          # - name: "doubao_video"
+          #   type: doubao_video
 
       # ------------------------------------------------
       # 以下为多实例配置示例 (默认注释)
@@ -157,6 +163,14 @@ queue:
   # 图片数量上限 
   # 网页最多支持10个附件，如果设置大于10则直接丢弃超出10的图片
   imageLimit: 5
+
+# 异步媒体任务与文件存储。媒体文件保存在 data/media，数据库仅保存元数据。
+media:
+  retentionSeconds: 86400       # 完成、失败或取消任务默认保留 24 小时
+  maxBytes: 2147483648          # data/media 总容量上限：2 GiB
+  maxUploadBytes: 20971520      # 单个上传参考文件上限：20 MiB
+  pollIntervalMs: 10000         # 视频轮询间隔：10 秒
+  pollTimeoutMs: 2700000        # 视频最长轮询时间：45 分钟
 
 browser:
   # 浏览器可执行文件路径 (留空则使用默认的)
