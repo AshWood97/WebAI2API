@@ -1,0 +1,186 @@
+From eb2ff1bafff22a3bd461200230d3af7dce4c42c1 Mon Sep 17 00:00:00 2001
+From: Ash Wood <49027529+AshWood97@users.noreply.github.com>
+Date: Sun, 9 Aug 2026 10:48:55 +0800
+Subject: [PATCH 2/2] feat(omninode): expose safe module deployment status
+
+
+diff --git a/src/backend/pool/PoolManager.js b/src/backend/pool/PoolManager.js
+index 9892f5b..001063c 100644
+--- a/src/backend/pool/PoolManager.js
++++ b/src/backend/pool/PoolManager.js
+@@ -281,6 +281,28 @@ export class PoolManager {
+         return { object: 'list', data: allModels };
+     }
+ 
++    /**
++     * Return only the scheduling data needed by a deployment controller.  This
++     * deliberately excludes pages, browser handles and cookies, so status can
++     * be exposed through the already authenticated Admin API.
++     */
++    getRuntimeStatus() {
++        const workers = this.workers.map(worker => ({
++            name: worker.name,
++            instance: worker.instanceName,
++            busy: worker.busyCount
++        }));
++        const busyWorkers = workers.filter(worker => worker.busy > 0);
++        return {
++            initialized: this.initialized,
++            workers,
++            workerCount: workers.length,
++            busyWorkers,
++            busyCount: busyWorkers.reduce((total, worker) => total + worker.busy, 0),
++            browserCount: new Set(this.workers.map(worker => worker.browser).filter(Boolean)).size
++        };
++    }
++
+     /**
+      * 获取图片策略（宽松策略：只要有一个 Worker 支持 optional 就返回 optional）
+      */
+diff --git a/src/media/MediaManager.js b/src/media/MediaManager.js
+index cabea8d..9b4530b 100644
+--- a/src/media/MediaManager.js
++++ b/src/media/MediaManager.js
+@@ -102,6 +102,20 @@ export class MediaManager {
+         return this.store.getJob(id);
+     }
+ 
++    /**
++     * Status suitable for a rolling deployment gate.  The job metadata remains
++     * private; callers only learn whether it is safe to restart the module.
++     */
++    getRuntimeStatus() {
++        const recoverableJobs = this.store.listRecoverableJobs();
++        return {
++            runningCount: this.running.size,
++            recoverableCount: recoverableJobs.length,
++            recoverableJobIds: recoverableJobs.map(job => job.id),
++            idle: this.running.size === 0 && recoverableJobs.length === 0
++        };
++    }
++
+     formatJob(job, basePath = '/v1') {
+         if (!job) return null;
+         const output = job.outputs[0] || null;
+diff --git a/src/server/api/admin/routes.js b/src/server/api/admin/routes.js
+index ff4e997..7b8af56 100644
+--- a/src/server/api/admin/routes.js
++++ b/src/server/api/admin/routes.js
+@@ -73,7 +73,7 @@ async function readBody(req) {
+  * @returns {Function} Admin 路由处理函数
+  */
+ export function createAdminRouter(context) {
+-    const { config, queueManager, tempDir, getSafeMode } = context;
++    const { config, queueManager, tempDir, getSafeMode, getRuntimeStatus } = context;
+ 
+     /**
+      * Admin 路由处理函数
+@@ -95,6 +95,13 @@ export function createAdminRouter(context) {
+                 return;
+             }
+ 
++            // GET /admin/omninode-status - deployment gate, protected by the
++            // normal Admin API bearer check performed by the global router.
++            if (method === 'GET' && pathname === '/omninode-status') {
++                sendJson(res, 200, getRuntimeStatus?.() || { ready: false, idle: false });
++                return;
++            }
++
+             // POST /admin/restart - 重启服务
+             if (method === 'POST' && pathname === '/restart') {
+                 // 解析请求体获取重启参数
+diff --git a/src/server/api/index.js b/src/server/api/index.js
+index d06ae21..7571917 100644
+--- a/src/server/api/index.js
++++ b/src/server/api/index.js
+@@ -36,14 +36,14 @@ const WEBUI_DIR = path.join(process.cwd(), 'webui', 'dist');
+  * @returns {Function} 请求处理函数
+  */
+ export function createGlobalRouter(context) {
+-    const { authToken, config, queueManager, tempDir, loginMode, getSafeMode } = context;
++    const { authToken, config, queueManager, tempDir, loginMode, getSafeMode, getRuntimeStatus } = context;
+ 
+     // 创建鉴权中间件
+     const checkAuth = createAuthMiddleware(authToken);
+ 
+     // 创建子路由处理器
+     const handleOpenAIRequest = loginMode ? null : createOpenAIRouter(context);
+-    const handleAdminRequest = createAdminRouter({ config, queueManager, tempDir, getSafeMode });
++    const handleAdminRequest = createAdminRouter({ config, queueManager, tempDir, getSafeMode, getRuntimeStatus });
+ 
+     /**
+      * 主路由处理函数
+diff --git a/src/server/server.js b/src/server/server.js
+index 995af27..9f72bf5 100644
+--- a/src/server/server.js
++++ b/src/server/server.js
+@@ -110,6 +110,27 @@ const mediaManager = new MediaManager({
+     getWorkerCookies: async (workerName, domain) => await queueManager.getWorkerCookies(workerName, domain)
+ });
+ 
++function getRuntimeStatus() {
++    const queue = queueManager.getStatus();
++    const pool = backend.getPoolManager()?.getRuntimeStatus() || {
++        initialized: false,
++        workerCount: 0,
++        busyCount: 0,
++        busyWorkers: [],
++        browserCount: 0
++    };
++    const media = mediaManager.getRuntimeStatus();
++    const safe = safeMode;
++    return {
++        ready: !safe,
++        idle: !safe && queue.total === 0 && pool.busyCount === 0 && media.idle,
++        queue,
++        pool,
++        media,
++        safeMode: { enabled: safe, reason: safeModeReason }
++    };
++}
++
+ // ==================== 创建路由 ====================
+ 
+ /**
+@@ -139,7 +160,8 @@ const handleRequest = createGlobalRouter({
+     mediaManager,
+     config,
+     loginMode: isLoginMode,
+-    getSafeMode: () => ({ enabled: safeMode, reason: safeModeReason })
++    getSafeMode: () => ({ enabled: safeMode, reason: safeModeReason }),
++    getRuntimeStatus
+ });
+ 
+ // ==================== 启动服务器 ====================
+diff --git a/tests/media.test.js b/tests/media.test.js
+index 37b6e6c..bced468 100644
+--- a/tests/media.test.js
++++ b/tests/media.test.js
+@@ -39,6 +39,27 @@ test('media jobs are idempotent and persist data-url output outside SQLite', asy
+     assert.equal((await fs.readFile(manager.getContent(job).absolutePath)).toString(), 'hello');
+ });
+ 
++test('media runtime status blocks deployment while a job is running', async t => {
++    let release;
++    const manager = new MediaManager({
++        dataDir: await tempDataDir(t), logger,
++        mediaConfig: { pollIntervalMs: 5, pollTimeoutMs: 500 },
++        getWorkerCookies: async () => ({ cookies: [] }),
++        executeMedia: async () => await new Promise(resolve => { release = resolve; })
++    });
++    const { job } = manager.createJob('image', { model: 'image-test', prompt: 'hold' });
++    await new Promise(resolve => setImmediate(resolve));
++    assert.equal(manager.getRuntimeStatus().idle, false);
++    release({ image: 'data:image/png;base64,aGVsbG8=' });
++    await manager.running.get(job.id);
++    assert.deepEqual(manager.getRuntimeStatus(), {
++        runningCount: 0,
++        recoverableCount: 0,
++        recoverableJobIds: [],
++        idle: true
++    });
++});
++
+ test('pending video jobs poll to completion without duplicating submit', async t => {
+     let creates = 0;
+     let polls = 0;
