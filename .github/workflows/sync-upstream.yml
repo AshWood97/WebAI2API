@@ -1,0 +1,55 @@
+name: Sync upstream WebAI2API
+
+on:
+  schedule:
+    - cron: '17 * * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: webai2api-upstream-sync
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: omninode-patches
+          fetch-depth: 0
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Fetch upstream main
+        id: upstream
+        run: |
+          git remote add upstream https://github.com/foxhui/WebAI2API.git
+          git fetch --no-tags upstream main
+          if test "$(git merge-base HEAD upstream/main)" = "$(git rev-parse upstream/main)"; then
+            echo 'update=false' >> "$GITHUB_OUTPUT"
+          else
+            echo 'update=true' >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Reapply OmniNode patch layer and test
+        if: steps.upstream.outputs.update == 'true'
+        env:
+          CANDIDATE_DIR: ${{ runner.temp }}/webai2api-candidate
+        run: |
+          git worktree add --detach "$CANDIDATE_DIR" upstream/main
+          trap 'git worktree remove --force "$CANDIDATE_DIR"' EXIT
+          git -C "$CANDIDATE_DIR" am --3way "$GITHUB_WORKSPACE"/.github/omninode/patches/*.patch
+          cd "$CANDIDATE_DIR"
+          pnpm install --frozen-lockfile
+          pnpm test
+          git push --force origin HEAD:omninode-patches
