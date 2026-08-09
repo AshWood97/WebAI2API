@@ -1,0 +1,2184 @@
+From af17b1fb93d4303d621e7069734ff87610c2010b Mon Sep 17 00:00:00 2001
+From: Ash Wood <49027529+AshWood97@users.noreply.github.com>
+Date: Sun, 9 Aug 2026 10:46:42 +0800
+Subject: [PATCH 1/2] feat(omninode): add media and VNC extensions
+
+
+diff --git a/.dockerignore b/.dockerignore
+new file mode 100644
+index 0000000..f1fa3a0
+--- /dev/null
++++ b/.dockerignore
+@@ -0,0 +1,7 @@
++.git
++node_modules
++data
++test
++tests
++coverage
++.DS_Store
+diff --git a/Dockerfile b/Dockerfile
+index 16243c5..de9c484 100644
+--- a/Dockerfile
++++ b/Dockerfile
+@@ -1,4 +1,6 @@
+-FROM node:22-bookworm
++FROM foxhui/webai-2api:latest
++
++USER root
+ 
+ WORKDIR /app
+ 
+@@ -6,33 +8,28 @@ ENV DEBIAN_FRONTEND=noninteractive
+ ENV PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=true
+ 
+ # 1. 安装系统依赖
+-RUN apt-get update && apt-get install -y \
+-    xvfb \
+-    x11vnc \
+-    libasound2 \
+-    libatk-bridge2.0-0 \
+-    libgtk-3-0 \
+-    libnss3 \
+-    libx11-xcb1 \
+-    libxss1 \
+-    libxtst6 \
+-    libgbm1 \
+-    libdbus-glib-1-2 \
+-    python3 \
+-    build-essential \
++RUN apt-get update && apt-get install -y --no-install-recommends \
++    tigervnc-scraping-server \
+     && rm -rf /var/lib/apt/lists/*
+ 
+ # 2. 复制依赖文件、脚本和补丁目录，然后安装
+-COPY package.json pnpm-lock.yaml ./
+-COPY scripts/ ./scripts/
++COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
++COPY scripts/postinstall.js ./scripts/postinstall.js
+ COPY patches/ ./patches/
+-RUN npm install -g pnpm && pnpm install --frozen-lockfile
++RUN npm install -g pnpm && CI=true pnpm install --force --frozen-lockfile
+ 
+-# 3. 复制源码并初始化
++# 3. 复制源码。基础镜像已包含与其发布版本匹配的 Camoufox；不要在低内存
++# 服务器上重复下载浏览器二进制，依赖安装已完成 native module 自检。
+ COPY . .
+-RUN npm run init
++
++# X0tigervnc remains foreground-supervised by the upstream supervisor.  The
++# original x11vnc implementation in the upstream image can expose a TCP port
++# without completing the RFB handshake in this deployment.
++COPY scripts/start-with-tigervnc.sh /usr/local/bin/start-with-tigervnc
++RUN chmod 0755 /usr/local/bin/start-with-tigervnc
+ 
+ EXPOSE 3000 5900
+ 
+ # 4. 启动服务（配置文件会自动从 config.example.yaml 复制到 data/config.yaml）
+-CMD ["npm", "start", "--", "-xvfb", "-vnc"]
+\ No newline at end of file
++ENTRYPOINT ["/usr/local/bin/start-with-tigervnc"]
++CMD ["npm", "start", "--", "-xvfb", "-vnc"]
+diff --git a/config.example.yaml b/config.example.yaml
+index bdd055d..d1c7835 100644
+--- a/config.example.yaml
++++ b/config.example.yaml
+@@ -84,9 +84,15 @@ backend:
+             #   deepseek_text          (DeepSeek 文本生成)
+             #   doubao                 (豆包 图片生成)
+             #   doubao_text            (豆包 文本生成)
++            #   doubao_video           (豆包 Seedance 异步视频生成；低内存服务器建议复用 doubao Worker)
+             #   test                   (浏览器检测，仅供调试使用)
+             type: lmarena              # 适配器类型
+ 
++          # 如需把视频放入独立标签页，可添加下列 Worker。低内存服务器可不添加：
++          # doubao Worker 已内置 doubao-video / Seedance 模型，并以同一页面串行执行。
++          # - name: "doubao_video"
++          #   type: doubao_video
++
+       # ------------------------------------------------
+       # 以下为多实例配置示例 (默认注释)
+       # ------------------------------------------------
+@@ -158,6 +164,14 @@ queue:
+   # 网页最多支持10个附件，如果设置大于10则直接丢弃超出10的图片
+   imageLimit: 5
+ 
++# 异步媒体任务与文件存储。媒体文件保存在 data/media，数据库仅保存元数据。
++media:
++  retentionSeconds: 86400       # 完成、失败或取消任务默认保留 24 小时
++  maxBytes: 2147483648          # data/media 总容量上限：2 GiB
++  maxUploadBytes: 20971520      # 单个上传参考文件上限：20 MiB
++  pollIntervalMs: 10000         # 视频轮询间隔：10 秒
++  pollTimeoutMs: 2700000        # 视频最长轮询时间：45 分钟
++
+ browser:
+   # 浏览器可执行文件路径 (留空则使用默认的)
+   # 非必要不建议修改，否则你要处理很多额外依赖
+diff --git a/package.json b/package.json
+index de4c549..48b32ba 100644
+--- a/package.json
++++ b/package.json
+@@ -7,6 +7,7 @@
+ 	"type": "module",
+ 	"scripts": {
+ 		"start": "node supervisor.js",
++		"test": "node --test tests/*.test.js",
+ 		"genkey": "node scripts/genkey.js",
+ 		"init": "node scripts/init.js",
+ 		"postinstall": "node scripts/postinstall.js"
+@@ -32,4 +33,4 @@
+ 		"socks-proxy-agent": "^8.0.5",
+ 		"yaml": "^2.8.2"
+ 	}
+-}
+\ No newline at end of file
++}
+diff --git a/pnpm-workspace.yaml b/pnpm-workspace.yaml
+index 982e457..0d79f5d 100644
+--- a/pnpm-workspace.yaml
++++ b/pnpm-workspace.yaml
+@@ -1,5 +1,6 @@
+-ignoredBuiltDependencies:
+-  - better-sqlite3
++allowBuilds:
++  better-sqlite3: true
++  sharp: true
+ 
+ packages:
+-  - '!webui/**'
+\ No newline at end of file
++  - '!webui/**'
+diff --git a/scripts/enable-doubao-video.mjs b/scripts/enable-doubao-video.mjs
+new file mode 100644
+index 0000000..9439ad8
+--- /dev/null
++++ b/scripts/enable-doubao-video.mjs
+@@ -0,0 +1,29 @@
++/**
++ * Idempotently enable the Doubao video Worker in a mounted data/config.yaml.
++ *
++ * This intentionally edits only the two known additive blocks and preserves
++ * existing credentials, comments, account cookies and browser settings.
++ */
++
++import fs from 'fs';
++import path from 'path';
++
++const configPath = process.argv[2] || path.join(process.cwd(), 'data', 'config.yaml');
++let source = fs.readFileSync(configPath, 'utf8');
++
++if (!/^\s*- name:\s*["']?doubao_video["']?\s*$/m.test(source)) {
++    const anchor = /^([ \t]*)- name:\s*["']?doubao_text["']?[ \t]*\n\1  type:\s*doubao_text[ \t]*$/m;
++    if (!anchor.test(source)) {
++        throw new Error('未在现有配置中找到 doubao_text Worker，拒绝猜测插入位置');
++    }
++    source = source.replace(anchor, (match, indent) => `${match}\n\n${indent}- name: "doubao_video"\n${indent}  type: doubao_video`);
++}
++
++if (!/^media:\s*$/m.test(source)) {
++    source = `${source.trimEnd()}\n\n# 异步媒体任务配置（视频文件写入 data/media，元数据写入 SQLite）\nmedia:\n  retentionSeconds: 86400\n  maxBytes: 2147483648\n  maxUploadBytes: 20971520\n  pollIntervalMs: 10000\n  pollTimeoutMs: 2700000\n`;
++}
++
++const tempPath = `${configPath}.tmp-${process.pid}`;
++fs.writeFileSync(tempPath, source, { mode: 0o600 });
++fs.renameSync(tempPath, configPath);
++console.log(JSON.stringify({ configPath, doubaoVideo: true, media: true }));
+diff --git a/scripts/start-with-tigervnc.sh b/scripts/start-with-tigervnc.sh
+new file mode 100644
+index 0000000..a2be531
+--- /dev/null
++++ b/scripts/start-with-tigervnc.sh
+@@ -0,0 +1,45 @@
++#!/bin/sh
++set -eu
++
++# Keep X0tigervnc under the existing supervisor instead of starting a second
++# display server. This mutates only the image filesystem at container startup.
++node <<'NODE'
++const fs = require('fs');
++const target = '/app/supervisor.js';
++let source = fs.readFileSync(target, 'utf8');
++
++if (!source.includes("spawn('X0tigervnc'")) {
++  source = source.replace(
++    "if (!checkCommand('x11vnc')) {\n        log('WARN', '未找到 x11vnc 命令，跳过 VNC 启动');",
++    "if (!checkCommand('X0tigervnc')) {\n        log('WARN', '未找到 X0tigervnc 命令，跳过 VNC 启动');"
++  );
++
++  const oldBlock = `const vncProcess = spawn('x11vnc', [
++        '-display', display,
++        '-rfbport', String(vncPort),
++        '-localhost',
++        '-nopw',
++        '-shared',
++        '-forever',
++        '-noxdamage',
++        '-norc',
++        '-geometry', '1366x768'
++    ], {`;
++  const newBlock = `const vncProcess = spawn('X0tigervnc', [
++        '-display', display,
++        '-rfbport', String(vncPort),
++        '-localhost',
++        '-SecurityTypes', 'None',
++        '-AlwaysShared'
++    ], {`;
++
++  if (!source.includes(oldBlock)) {
++    throw new Error('WebAI2API supervisor VNC block did not match the supported upstream version');
++  }
++
++  source = source.replace(oldBlock, newBlock);
++  fs.writeFileSync(target, source);
++}
++NODE
++
++exec /usr/local/bin/docker-entrypoint.sh "$@"
+diff --git a/src/backend/adapter/doubao.js b/src/backend/adapter/doubao.js
+index f262d74..26c4590 100644
+--- a/src/backend/adapter/doubao.js
++++ b/src/backend/adapter/doubao.js
+@@ -15,6 +15,8 @@ import {
+     useContextDownload
+ } from '../utils/index.js';
+ import { logger } from '../../utils/logger.js';
++import { createVideo, pollVideo, cancelVideo } from './doubao_video.js';
++import { createAudio } from './doubao_audio.js';
+ 
+ // --- 配置常量 ---
+ const TARGET_URL = 'https://www.doubao.com/chat/';
+@@ -272,8 +274,8 @@ function extractRawImage(sseData) {
+  */
+ export const manifest = {
+     id: 'doubao',
+-    displayName: '豆包 (图片生成)',
+-    description: '使用字节跳动豆包生成图片，支持多种模型和参考图片上传。需要已登录的豆包账户。',
++    displayName: '豆包 (图片、视频生成)',
++    description: '使用字节跳动豆包生成图片与 Seedance 视频，复用同一登录页面。',
+ 
+     getTargetUrl(config, workerConfig) {
+         return TARGET_URL;
+@@ -282,10 +284,18 @@ export const manifest = {
+     models: [
+         { id: 'seedream-4.5', codeName: 'Seedream 4.5', imagePolicy: 'optional' },
+         { id: 'seedream-4.0', codeName: 'Seedream 4.0', imagePolicy: 'optional' },
+-        { id: 'seedream-5.0-lite', codeName: 'Seedream 5.0 Lite', imagePolicy: 'optional' }
++        { id: 'seedream-5.0-lite', codeName: 'Seedream 5.0 Lite', imagePolicy: 'optional' },
++        { id: 'doubao-video', imagePolicy: 'optional', type: 'video', capabilities: ['text_to_video', 'image_to_video', 'async'] },
++        { id: 'seedance-2.0', imagePolicy: 'optional', type: 'video', capabilities: ['text_to_video', 'image_to_video', 'async'] },
++        { id: 'seedance-2.0-fast', imagePolicy: 'optional', type: 'video', capabilities: ['text_to_video', 'image_to_video', 'async'] },
++        { id: 'doubao-music', imagePolicy: 'forbidden', type: 'audio', capabilities: ['music_generation', 'async'] }
+     ],
+ 
+     navigationHandlers: [],
+ 
+-    generate
++    generate,
++    createVideo,
++    pollVideo,
++    cancelVideo,
++    createAudio
+ };
+diff --git a/src/backend/adapter/doubao_audio.js b/src/backend/adapter/doubao_audio.js
+new file mode 100644
+index 0000000..8c78b60
+--- /dev/null
++++ b/src/backend/adapter/doubao_audio.js
+@@ -0,0 +1,118 @@
++/**
++ * Doubao Web music adapter. It shares the logged-in Doubao browser page with
++ * image/video work and returns a normal media-job result instead of base64.
++ */
++
++import crypto from 'crypto';
++import { gotoWithCheck } from '../utils/index.js';
++import { logger } from '../../utils/logger.js';
++import { asJson, browserSsePost, decodePossibleUrl, parseSse } from './doubao_video.js';
++
++const TARGET_URL = 'https://www.doubao.com/chat/';
++
++function buildMusicPayload(prompt, options = {}) {
++    const settings = options.provider_options || {};
++    const lyric = settings.lyric || '';
++    const genre = settings.genre || 'Pop';
++    const mood = settings.mood || 'Happy';
++    const gender = settings.voice || settings.gender || 'Female';
++    const generationType = lyric ? 'custome_lyric' : 'AI_lyric';
++    const variables = {
++        lyric,
++        theme: lyric ? '' : prompt,
++        mood,
++        genre,
++        gender,
++        generation_type: generationType
++    };
++    const message = {
++        content: JSON.stringify({ text: prompt, ...variables }),
++        content_type: 2005,
++        attachments: [],
++        references: [],
++        skill: { skill_type: 9, skill_type_no_default: 9, skill_id: '9', skill_id_no_default: '9' },
++        ext: { input_skill: JSON.stringify({ skill_id: '9', skill_type: 9, variables }) }
++    };
++    return {
++        messages: [message],
++        completion_option: {
++            is_regen: false,
++            with_suggest: true,
++            need_create_conversation: true,
++            launch_stage: 1,
++            is_replace: false,
++            is_delete: false,
++            is_ai_playground: false,
++            memory_type: 2,
++            message_from: 0,
++            use_deep_think: false,
++            use_auto_cot: false,
++            resend_for_regen: false,
++            enable_commerce_credit: false,
++            action_bar_skill_id: 9
++        },
++        evaluate_option: { web_ab_params: '' },
++        local_conversation_id: crypto.randomUUID(),
++        local_message_id: crypto.randomUUID()
++    };
++}
++
++export function parseMusicResult(raw) {
++    const tracks = [];
++    let lastContent = null;
++    for (const event of parseSse(raw)) {
++        const eventData = asJson(event.event_data);
++        if (event.event_type === 2005) {
++            const message = typeof eventData === 'string' ? eventData : JSON.stringify(eventData || {});
++            return { error: `豆包音乐请求失败: ${message.slice(0, 500)}` };
++        }
++        const message = asJson(eventData?.message);
++        if (!message || ![2004, 2006].includes(message.content_type)) continue;
++        const content = asJson(message.content);
++        if (content && typeof content === 'object') lastContent = content;
++    }
++    if (!lastContent) return { tracks: [], message: '豆包未返回音乐内容' };
++
++    const values = Array.isArray(lastContent.tasks)
++        ? lastContent.tasks
++        : Object.values(lastContent.tasks || {});
++    for (const task of values) {
++        if (!task || typeof task !== 'object') continue;
++        if (task.music_gen_failed) {
++            return { error: task.music_gen_failed_msg || '豆包音乐生成失败' };
++        }
++        let audioUrl = task.audio_url || task.play_url || task.url || '';
++        const videoModel = asJson(task.video_model);
++        if (!audioUrl && videoModel?.video_list) {
++            for (const item of Object.values(videoModel.video_list)) {
++                audioUrl = decodePossibleUrl(item?.main_url || item?.backup_url);
++                if (audioUrl) break;
++            }
++        }
++        if (!audioUrl) continue;
++        const cover = task.cover || {};
++        tracks.push({
++            audio_url: audioUrl,
++            title: task.title || '',
++            lyrics: task.lyric || '',
++            duration: task.duration || task.video_duration || videoModel?.video_duration || 0,
++            cover_url: task.cover_url || cover.image_ori?.url || cover.image_thumb?.url || ''
++        });
++    }
++    return { tracks, message: tracks.length ? '音乐已生成' : '豆包音乐仍在生成或未返回音频链接' };
++}
++
++export async function createAudio(context, payload, modelId, meta = {}) {
++    if (modelId !== 'doubao-music') return { error: `暂不支持的豆包音频模型: ${modelId}` };
++    try {
++        await gotoWithCheck(context.page, TARGET_URL);
++        const raw = await browserSsePost(context.page, '/samantha/chat/completion', buildMusicPayload(payload.prompt, payload.options), 300_000);
++        const result = parseMusicResult(raw);
++        if (result.error) return result;
++        if (!result.tracks.length) return { error: result.message };
++        return result;
++    } catch (error) {
++        logger.error('适配器', '豆包音乐生成失败', { ...meta, error: error.message, modelId });
++        return { error: `豆包音乐生成失败: ${error.message}` };
++    }
++}
+diff --git a/src/backend/adapter/doubao_video.js b/src/backend/adapter/doubao_video.js
+new file mode 100644
+index 0000000..9c46a5a
+--- /dev/null
++++ b/src/backend/adapter/doubao_video.js
+@@ -0,0 +1,370 @@
++/**
++ * Doubao Web video adapter.
++ *
++ * Requests are made from the already logged-in Camoufox page so Doubao's web
++ * fetch interceptor, cookies and browser fingerprint remain in one place. It
++ * intentionally does not run a second Playwright/Chromium process.
++ */
++
++import crypto from 'crypto';
++import { safeClick, sleep, uploadFilesViaChooser } from '../engine/utils.js';
++import { gotoWithCheck } from '../utils/index.js';
++import { logger } from '../../utils/logger.js';
++
++const TARGET_URL = 'https://www.doubao.com/chat/';
++const VIDEO_URL_PATTERN = /(?:\.mp4|\.m3u8|\/video\/|douyinvod|video_gen|mime_type=video_mp4)/i;
++
++export function asJson(value) {
++    if (typeof value !== 'string') return value;
++    try { return JSON.parse(value); } catch { return value; }
++}
++
++export function parseSse(raw) {
++    const events = [];
++    for (const block of String(raw || '').split(/\n\n/)) {
++        const dataLine = block.split('\n').find(line => line.startsWith('data:'));
++        if (!dataLine) continue;
++        try {
++            events.push(JSON.parse(dataLine.slice(5).trim()));
++        } catch { /* Ignore heartbeat and non-JSON lines. */ }
++    }
++    return events;
++}
++
++function findId(value, terms) {
++    value = asJson(value);
++    if (Array.isArray(value)) {
++        for (const item of value) {
++            const found = findId(item, terms);
++            if (found) return found;
++        }
++        return '';
++    }
++    if (!value || typeof value !== 'object') return '';
++    for (const [key, candidate] of Object.entries(value)) {
++        const compact = key.replace(/[-_\s]/g, '').toLowerCase();
++        if (compact.includes('id') && terms.some(term => compact.includes(term)) && candidate && String(candidate) !== '0') {
++            return String(candidate);
++        }
++    }
++    for (const child of Object.values(value)) {
++        const found = findId(child, terms);
++        if (found) return found;
++    }
++    return '';
++}
++
++export function decodePossibleUrl(value) {
++    if (typeof value !== 'string') return '';
++    if (/^https?:\/\//i.test(value)) return value;
++    try {
++        const decoded = Buffer.from(value, 'base64').toString('utf8');
++        return /^https?:\/\//i.test(decoded) ? decoded : '';
++    } catch {
++        return '';
++    }
++}
++
++function collectResponse(raw) {
++    const videos = [];
++    const texts = [];
++    let providerTaskId = '';
++    let conversationId = '';
++    const seen = new Set();
++
++    const addVideo = (value, details = {}) => {
++        const url = decodePossibleUrl(value);
++        if (!url || !VIDEO_URL_PATTERN.test(url) || seen.has(url)) return;
++        seen.add(url);
++        videos.push({
++            video_url: url,
++            cover_url: details.cover_url || details.poster || details.cover?.url || '',
++            width: details.width || details.video_width || 0,
++            height: details.height || details.video_height || 0,
++            duration: details.duration || details.video_duration || 0
++        });
++    };
++    const walk = value => {
++        value = asJson(value);
++        if (Array.isArray(value)) {
++            value.forEach(walk);
++            return;
++        }
++        if (!value || typeof value !== 'object') return;
++        if (!conversationId) conversationId = findId(value, ['conversation', 'thread']);
++        if (!providerTaskId) providerTaskId = findId(value, ['task']);
++        const content = asJson(value.content);
++        if (content && typeof content === 'object' && typeof content.text === 'string') texts.push(content.text);
++        if (value.text_block?.text) texts.push(value.text_block.text);
++        for (const key of ['video_url', 'url', 'main_url', 'play_url', 'download_url']) addVideo(value[key], value);
++        if (value.video_model) walk(value.video_model);
++        for (const child of Object.values(value)) {
++            if (child !== content && child !== value.video_model) walk(child);
++        }
++    };
++
++    for (const event of parseSse(raw)) {
++        if (!conversationId) conversationId = findId(event, ['conversation', 'thread']);
++        const eventData = asJson(event.event_data);
++        if (event.event_type === 2005) {
++            const message = typeof eventData === 'string' ? eventData : JSON.stringify(eventData || {});
++            return { error: `豆包视频请求失败: ${message.slice(0, 500)}` };
++        }
++        if (eventData?.fin_reason?.async_task?.id) providerTaskId = String(eventData.fin_reason.async_task.id);
++        walk(eventData || event);
++    }
++    return {
++        videos,
++        providerTaskId,
++        conversationId,
++        message: texts.join('').trim()
++    };
++}
++
++function isTerminalFailure(message) {
++    const text = String(message || '').toLowerCase();
++    return [
++        '额度不足', '额度已用完', '没有视频生成权益', '免费次数已用完',
++        '积分不足', '余额不足', 'quota exceeded', 'quota exhausted', 'captcha'
++    ].some(marker => text.includes(marker));
++}
++
++function buildQuery(params) {
++    return new URLSearchParams({
++        aid: '497858',
++        device_id: params.deviceId || '',
++        device_platform: 'web',
++        fp: params.fp || '',
++        language: 'zh',
++        pc_version: '3.22.5',
++        pkg_type: 'release_version',
++        real_aid: '497858',
++        region: params.region || '',
++        samantha_web: '1',
++        sys_region: params.region || '',
++        tea_uuid: params.webId || '',
++        'use-olympus-account': '1',
++        version_code: '20800',
++        web_id: params.webId || '',
++        web_platform: 'browser',
++        web_tab_id: crypto.randomUUID()
++    }).toString();
++}
++
++async function getRuntimeParams(page) {
++    return await page.evaluate(() => {
++        const readJson = key => {
++            try { return JSON.parse(localStorage.getItem(key) || '{}'); } catch { return {}; }
++        };
++        const sam = readJson('samantha_web_web_id');
++        const tea = readJson('__tea_cache_tokens_497858');
++        const fp = document.cookie.split(';').map(item => item.trim()).find(item => item.startsWith('s_v_web_id='));
++        return {
++            deviceId: sam.web_id || '',
++            webId: tea.web_id || '',
++            fp: fp ? fp.slice('s_v_web_id='.length) : '',
++            region: localStorage.getItem('flow_user_country') || ''
++        };
++    });
++}
++
++export async function browserSsePost(page, endpoint, payload, timeoutMs) {
++    const runtime = await getRuntimeParams(page);
++    if (!runtime.deviceId || !runtime.webId) throw new Error('豆包会话参数不可用，请重新登录豆包网页');
++    const url = `${endpoint}?${buildQuery(runtime)}`;
++    const result = await page.evaluate(async ({ url, payloadJson, timeoutMs }) => {
++        const csrf = document.cookie.match(/passport_csrf_token=([^;]+)/)?.[1] || '';
++        const controller = new AbortController();
++        const timer = setTimeout(() => controller.abort(), timeoutMs);
++        try {
++            const response = await fetch(url, {
++                method: 'POST',
++                credentials: 'include',
++                headers: {
++                    Accept: 'text/event-stream',
++                    'Content-Type': 'application/json',
++                    'Agw-Js-Conv': 'str',
++                    ...(csrf ? { 'x-tt-passport-csrf-token': csrf } : {})
++                },
++                body: payloadJson,
++                signal: controller.signal
++            });
++            const body = await response.text();
++            return { ok: response.ok, status: response.status, body };
++        } catch (error) {
++            return { ok: false, status: 0, body: String(error?.message || error) };
++        } finally {
++            clearTimeout(timer);
++        }
++    }, { url, payloadJson: JSON.stringify(payload), timeoutMs });
++    if (!result.ok) throw new Error(`豆包网页接口失败 (${result.status}): ${String(result.body).slice(0, 500)}`);
++    return result.body;
++}
++
++async function uploadReferences(page, inputPaths, meta) {
++    if (!inputPaths?.length) return [];
++    const storeUris = new Set();
++    const responseHandler = async response => {
++        try {
++            if (!response.url().includes('Action=ApplyImageUpload') || response.status() !== 200) return;
++            const body = await response.json();
++            const uri = body?.Result?.UploadAddress?.StoreInfos?.[0]?.StoreUri;
++            if (uri) storeUris.add(uri);
++        } catch { /* A non-JSON upload response is not a usable reference. */ }
++    };
++    page.on('response', responseHandler);
++    try {
++        const menuButton = page.locator('#input-engine-container button[aria-haspopup="menu"]')
++            .filter({ hasNot: page.locator('text=/Fast|Think|Pro|快速|思考|专家|更多/') }).first();
++        await safeClick(page, menuButton, { bias: 'button', timeout: 10_000 });
++        await sleep(300, 500);
++        const uploadItem = page.locator('div[role="menuitem"]').filter({ hasText: /上传文件或图片|上傳檔案或圖片|Upload File or Image/ }).first();
++        await uploadFilesViaChooser(page, uploadItem, inputPaths, {
++            uploadValidator: response => response.status() === 200 && response.url().includes('ApplyImageUpload')
++        }, meta);
++        await sleep(500, 1000);
++    } finally {
++        page.off('response', responseHandler);
++    }
++    if (storeUris.size !== inputPaths.length) {
++        throw new Error('豆包参考图上传未完成；请确认网页帐号具有上传权限后重试');
++    }
++    return [...storeUris];
++}
++
++function buildVideoPayload(prompt, options, imageKeys) {
++    const videoModel = options?.provider_options?.video_model || 'seedance_v2.0';
++    const content = {
++        text: prompt,
++        model: videoModel,
++        duration: options?.seconds || 10
++    };
++    if (options?.size) content.ratio = options.size;
++    if (imageKeys.length) {
++        content.ref_image_key = imageKeys[0];
++        content.ref_image_keys = imageKeys;
++        content.reference_image_keys = imageKeys;
++        content.reference_images = imageKeys.map(key => ({ key, type: 'image' }));
++    }
++    const message = {
++        content: JSON.stringify(content),
++        content_type: 2020,
++        attachments: imageKeys.map(key => ({ type: 'image', key, extra: { refer_types: 'overall' } })),
++        references: [],
++        skill: { skill_type: 17, skill_type_no_default: 17, skill_id: '17', skill_id_no_default: '17' }
++    };
++    return {
++        messages: [message],
++        completion_option: {
++            is_regen: false,
++            with_suggest: true,
++            need_create_conversation: true,
++            launch_stage: 1,
++            is_replace: false,
++            is_delete: false,
++            is_ai_playground: false,
++            memory_type: 2,
++            message_from: 0,
++            use_deep_think: false,
++            use_auto_cot: false,
++            resend_for_regen: false,
++            enable_commerce_credit: false,
++            action_bar_skill_id: 17,
++            conversation_init_option: { need_ack_conversation: true }
++        },
++        evaluate_option: { web_ab_params: '' },
++        ext: { conversation_init_option: JSON.stringify({ need_ack_conversation: true }) },
++        local_conversation_id: crypto.randomUUID(),
++        local_message_id: crypto.randomUUID()
++    };
++}
++
++export async function createVideo(context, payload, modelId, meta = {}) {
++    const { page } = context;
++    try {
++        await gotoWithCheck(page, TARGET_URL);
++        const imageKeys = await uploadReferences(page, payload.inputPaths || [], meta);
++        const raw = await browserSsePost(page, '/samantha/chat/completion', buildVideoPayload(payload.prompt, payload.options, imageKeys), 60_000);
++        const parsed = collectResponse(raw);
++        if (parsed.error) return parsed;
++        if (parsed.videos.length) return { outputs: parsed.videos, message: parsed.message };
++        if (isTerminalFailure(parsed.message)) return { error: parsed.message || '豆包视频额度或权限不可用', retryable: false };
++        if (!parsed.providerTaskId && !parsed.conversationId) {
++            return { error: `豆包未返回可恢复的视频任务标识: ${(parsed.message || 'unknown').slice(0, 300)}` };
++        }
++        return {
++            pending: true,
++            progress: 30,
++            providerTaskId: parsed.providerTaskId,
++            conversationId: parsed.conversationId,
++            message: parsed.message || '豆包已接受视频生成任务'
++        };
++    } catch (error) {
++        logger.error('适配器', '豆包视频提交失败', { ...meta, error: error.message, modelId });
++        return { error: `豆包视频提交失败: ${error.message}` };
++    }
++}
++
++export async function pollVideo(context, payload, modelId, meta = {}) {
++    const { page } = context;
++    const job = payload.job || {};
++    try {
++        if (job.provider_task_id) {
++            const raw = await browserSsePost(page, '/samantha/chat/async/stream', {
++                task_id: job.provider_task_id,
++                event_id: 0
++            }, 45_000);
++            const parsed = collectResponse(raw);
++            if (parsed.error) return parsed;
++            if (parsed.videos.length) return { outputs: parsed.videos, message: parsed.message };
++            if (isTerminalFailure(parsed.message)) return { error: parsed.message || '豆包视频任务失败', retryable: false };
++            return { pending: true, progress: 45, message: parsed.message || job.message };
++        }
++        if (job.conversation_id) {
++            await gotoWithCheck(page, `https://www.doubao.com/chat/${job.conversation_id}`);
++            const urls = await page.evaluate(() => {
++                const pattern = /mp4|m3u8|douyinvod|mime_type=video_mp4|video_gen/i;
++                const found = new Set();
++                for (const element of document.querySelectorAll('video, source, a, [src], [href]')) {
++                    for (const key of ['src', 'href', 'currentSrc']) {
++                        const value = element[key] || element.getAttribute?.(key);
++                        if (typeof value === 'string' && /^https?:/.test(value) && pattern.test(value)) found.add(value);
++                    }
++                }
++                return [...found];
++            });
++            if (urls.length) return { outputs: urls.map(video_url => ({ video_url })), message: '视频已生成' };
++        }
++        return { pending: true, progress: 45, message: job.message || '豆包仍在生成视频' };
++    } catch (error) {
++        logger.warn('适配器', '豆包视频轮询失败', { ...meta, error: error.message, modelId });
++        return { pending: true, progress: 35, message: `轮询暂时失败，将自动重试：${error.message}` };
++    }
++}
++
++export async function cancelVideo() {
++    // Doubao Web has no stable public cancel endpoint. Marking the local task as
++    // cancelled prevents further polling without guessing an upstream mutation.
++    return { cancelled: true };
++}
++
++async function generate() {
++    return { error: '视频模型请使用 POST /v1/videos' };
++}
++
++export const manifest = {
++    id: 'doubao_video',
++    displayName: '豆包视频（Seedance）',
++    description: '复用已登录的豆包 Web 页面创建和轮询 Seedance 视频任务。',
++    getTargetUrl() { return TARGET_URL; },
++    models: [
++        { id: 'doubao-video', imagePolicy: 'optional', type: 'video', capabilities: ['text_to_video', 'image_to_video', 'async'] },
++        { id: 'seedance-2.0', imagePolicy: 'optional', type: 'video', capabilities: ['text_to_video', 'image_to_video', 'async'] },
++        { id: 'seedance-2.0-fast', imagePolicy: 'optional', type: 'video', capabilities: ['text_to_video', 'image_to_video', 'async'] }
++    ],
++    navigationHandlers: [],
++    generate,
++    createVideo,
++    pollVideo,
++    cancelVideo
++};
+diff --git a/src/backend/index.js b/src/backend/index.js
+index 59c5811..310f2dc 100644
+--- a/src/backend/index.js
++++ b/src/backend/index.js
+@@ -74,6 +74,16 @@ export function getBackend() {
+             return await poolManager.generate(ctx, prompt, paths, modelId, meta);
+         },
+ 
++        /**
++         * 创建、轮询或取消异步媒体任务。
++         */
++        executeMedia: async (kind, payload, modelId, meta = {}) => {
++            if (!poolManager) {
++                return { error: 'Pool 未初始化' };
++            }
++            return await poolManager.executeMedia(kind, payload, modelId, meta);
++        },
++
+         /**
+          * 获取模型列表
+          * @returns {object}
+diff --git a/src/backend/pool/PoolManager.js b/src/backend/pool/PoolManager.js
+index 8f51da3..9892f5b 100644
+--- a/src/backend/pool/PoolManager.js
++++ b/src/backend/pool/PoolManager.js
+@@ -230,6 +230,37 @@ export class PoolManager {
+         }
+     }
+ 
++    /**
++     * 分发异步媒体任务。视频一旦被上游接受就不能对其它 Worker 重试，
++     * 否则会造成重复生成和重复扣费，因此这里只选择一个 Worker 执行。
++     *
++     * @param {'video'|'audio'|'image'} kind
++     * @param {object} payload
++     * @param {string} modelId
++     * @param {object} meta
++     * @returns {Promise<object>}
++     */
++    async executeMedia(kind, payload, modelId, meta = {}) {
++        const candidates = this.workers.filter(worker => worker.supports(modelId));
++        if (candidates.length === 0) {
++            return { error: `没有 Worker 支持模型: ${modelId}` };
++        }
++
++        const worker = this.strategySelector.sort(candidates)[0];
++        logger.debug('工作池', `媒体任务分发至: ${worker.name}`, {
++            ...meta,
++            mediaKind: kind,
++            operation: payload.operation || 'create'
++        });
++
++        try {
++            return await worker.executeMedia(kind, payload, modelId, meta);
++        } catch (err) {
++            logger.error('工作池', `[${worker.name}] 媒体任务异常`, { error: err.message, ...meta });
++            return normalizeError(err.message || '媒体任务执行异常');
++        }
++    }
++
+     /**
+      * 获取所有模型列表
+      */
+@@ -287,7 +318,10 @@ export class PoolManager {
+     async getCookies(instanceName, domain) {
+         let worker;
+         if (instanceName) {
+-            worker = this.workers.find(w => w.instanceName === instanceName);
++            // 兼容既有 instance 名称，也允许媒体下载按实际 Worker 名称取
++            // Cookie，避免把 Cookie 暴露给调用方。
++            worker = this.workers.find(w => w.name === instanceName)
++                || this.workers.find(w => w.instanceName === instanceName);
+             if (!worker) {
+                 throw new Error(`浏览器实例不存在: ${instanceName}`);
+             }
+diff --git a/src/backend/pool/Worker.js b/src/backend/pool/Worker.js
+index 478f886..cbd70cf 100644
+--- a/src/backend/pool/Worker.js
++++ b/src/backend/pool/Worker.js
+@@ -9,6 +9,10 @@ import { initBrowserBase, createCursor } from '../engine/launcher.js';
+ import { registry } from '../registry.js';
+ import { tryGotoWithCheck } from '../utils/page.js';
+ 
++function capitalize(value) {
++    return value ? value[0].toUpperCase() + value.slice(1) : value;
++}
++
+ /**
+  * Worker 类 - 封装单个浏览器实例
+  */
+@@ -36,6 +40,12 @@ export class Worker {
+         this.busyCount = 0;
+         this.initialized = false;
+ 
++        // 同一网页标签不能同时执行两次自动化操作。此前 busyCount 仅用于调度
++        // 指标，多个请求仍可能同时改写输入框或等待同一个 SSE 响应。
++        // 这里使用一个轻量 Promise 队列，保证每个 Worker/page 串行；不同
++        // Worker 的不同页面仍可并行。
++        this._pageExecutionTail = Promise.resolve();
++
+         // 浏览器所有权（用于共享浏览器场景的协调重启）
+         this._isBrowserOwner = false;  // 是否是浏览器的所有者（负责重启）
+         this._browserOwner = null;     // 如果是共享者，指向所有者 Worker
+@@ -493,7 +503,102 @@ export class Worker {
+         this.busyCount++;
+         try {
+             // 传递原始 modelId，由适配器自己解析
+-            return await adapter.generate(subContext, prompt, paths, modelId, enrichedMeta);
++            return await this._withPageLock(() => adapter.generate(
++                subContext,
++                prompt,
++                paths,
++                modelId,
++                enrichedMeta
++            ));
++        } finally {
++            this.busyCount--;
++        }
++    }
++
++    /**
++     * 在当前页面上串行执行任务。
++     * @private
++     * @param {() => Promise<any>} operation
++     * @returns {Promise<any>}
++     */
++    async _withPageLock(operation) {
++        const previous = this._pageExecutionTail;
++        let release;
++        this._pageExecutionTail = new Promise(resolve => {
++            release = resolve;
++        });
++
++        await previous;
++        try {
++            return await operation();
++        } finally {
++            release();
++        }
++    }
++
++    /**
++     * 执行异步媒体任务。适配器可选实现 createVideo/pollVideo/cancelVideo、
++     * createAudio 或 createImage；图片未提供专用接口时回退到既有 generate。
++     *
++     * @param {'video'|'audio'|'image'} kind
++     * @param {object} payload
++     * @param {string} modelId
++     * @param {object} meta
++     * @returns {Promise<object>}
++     */
++    async executeMedia(kind, payload, modelId, meta = {}) {
++        if (!this.supports(modelId)) {
++            return { error: `Worker [${this.name}] 不支持模型: ${modelId}` };
++        }
++
++        if (!this.initialized || !this.page || this.page.isClosed()) {
++            try {
++                await this._reinit();
++            } catch (e) {
++                return { error: `Worker 重新初始化失败: ${e.message}` };
++            }
++        }
++
++        const type = this._getAdapterType(modelId);
++        const actualModelId = modelId.includes('/') ? modelId.split('/', 2)[1] : modelId;
++        const adapter = registry.getAdapter(type);
++        if (!adapter) return { error: `适配器不存在: ${type}` };
++
++        const subContext = {
++            page: this.page,
++            config: this.globalConfig,
++            proxyConfig: this.proxyConfig,
++            userDataDir: this.userDataDir,
++            workerName: this.name,
++            instanceName: this.instanceName
++        };
++        const operation = payload.operation || 'create';
++        const methodName = operation === 'poll'
++            ? `poll${capitalize(kind)}`
++            : operation === 'cancel'
++                ? `cancel${capitalize(kind)}`
++                : `create${capitalize(kind)}`;
++
++        this.busyCount++;
++        try {
++            return await this._withPageLock(async () => {
++                const enrichedMeta = { ...meta, adapter: type, model: actualModelId, mediaKind: kind, operation };
++                let result;
++                if (typeof adapter[methodName] === 'function') {
++                    result = await adapter[methodName](subContext, payload, actualModelId, enrichedMeta);
++                } else if (kind === 'image' && operation === 'create') {
++                    result = await adapter.generate(
++                        subContext,
++                        payload.prompt,
++                        payload.inputPaths || [],
++                        actualModelId,
++                        enrichedMeta
++                    );
++                } else {
++                    result = { error: `适配器 ${type} 未实现 ${methodName}` };
++                }
++                return { ...(result || {}), workerName: this.name, adapter: type };
++            });
+         } finally {
+             this.busyCount--;
+         }
+diff --git a/src/backend/registry.js b/src/backend/registry.js
+index 00cb4a7..2140b07 100644
+--- a/src/backend/registry.js
++++ b/src/backend/registry.js
+@@ -16,6 +16,9 @@ import { logger } from '../utils/logger.js';
+ const __filename = fileURLToPath(import.meta.url);
+ const __dirname = path.dirname(__filename);
+ const ADAPTER_DIR = path.join(__dirname, 'adapter');
++// Helper modules live alongside adapters so a provider can share its web
++// protocol implementation without creating another runtime adapter.
++const AUXILIARY_MODULES = new Set(['doubao_audio.js']);
+ 
+ /**
+  * 图片输入策略枚举
+@@ -79,7 +82,8 @@ class AdapterRegistry {
+         //logger.info('注册表', `正在扫描适配器目录: ${ADAPTER_DIR}`);
+         logger.info('注册表', `正在扫描适配器目录...`);
+ 
+-        const files = fs.readdirSync(ADAPTER_DIR).filter(f => f.endsWith('.js'));
++        const files = fs.readdirSync(ADAPTER_DIR)
++            .filter(f => f.endsWith('.js') && !AUXILIARY_MODULES.has(f));
+ 
+         for (const file of files) {
+             const filePath = path.join(ADAPTER_DIR, file);
+@@ -234,7 +238,8 @@ class AdapterRegistry {
+                 created: Math.floor(Date.now() / 1000),
+                 owned_by: id,
+                 image_policy: m.imagePolicy,
+-                type: m.type || 'image'
++                type: m.type || 'image',
++                capabilities: m.capabilities || []
+             }));
+ 
+         return { object: 'list', data };
+@@ -299,7 +304,7 @@ class AdapterRegistry {
+      * 获取模型的类型
+      * @param {string} adapterId - 适配器 ID
+      * @param {string} modelKey - 模型 key
+-     * @returns {string} 'text' | 'image'
++     * @returns {string} 'text' | 'image' | 'video' | 'audio'
+      */
+     getModelType(adapterId, modelKey) {
+         const adapter = this.getAdapter(adapterId);
+@@ -327,7 +332,8 @@ class AdapterRegistry {
+                         created: Math.floor(Date.now() / 1000),
+                         owned_by: id,
+                         image_policy: m.imagePolicy,
+-                        type: m.type || 'image'
++                        type: m.type || 'image',
++                        capabilities: m.capabilities || []
+                     });
+                 }
+             }
+diff --git a/src/media/JobStore.js b/src/media/JobStore.js
+new file mode 100644
+index 0000000..6c8dbe4
+--- /dev/null
++++ b/src/media/JobStore.js
+@@ -0,0 +1,261 @@
++/**
++ * Persistent media job/file registry.
++ *
++ * Media is intentionally kept outside SQLite. SQLite only stores metadata and
++ * relative paths, so a large video can never inflate the database or API RAM.
++ */
++
++import crypto from 'crypto';
++import fs from 'fs';
++import path from 'path';
++import Database from 'better-sqlite3';
++
++const TERMINAL_STATUSES = new Set(['completed', 'failed', 'cancelled']);
++
++function now() {
++    return Math.floor(Date.now() / 1000);
++}
++
++function parseJson(value, fallback) {
++    if (!value) return fallback;
++    try {
++        return JSON.parse(value);
++    } catch {
++        return fallback;
++    }
++}
++
++function jobId(kind) {
++    return `${kind}_${crypto.randomUUID().replace(/-/g, '')}`;
++}
++
++/**
++ * SQLite-backed registry for async video/audio/image jobs and uploaded files.
++ */
++export class JobStore {
++    constructor(dataDir) {
++        this.dataDir = dataDir;
++        this.mediaDir = path.join(dataDir, 'media');
++        this.uploadDir = path.join(this.mediaDir, 'uploads');
++        this.outputDir = path.join(this.mediaDir, 'outputs');
++        fs.mkdirSync(this.uploadDir, { recursive: true, mode: 0o700 });
++        fs.mkdirSync(this.outputDir, { recursive: true, mode: 0o700 });
++
++        this.db = new Database(path.join(dataDir, 'media-jobs.sqlite3'));
++        this.db.pragma('journal_mode = WAL');
++        this.db.pragma('foreign_keys = ON');
++        this._init();
++    }
++
++    _init() {
++        this.db.exec(`
++            CREATE TABLE IF NOT EXISTS media_schema (
++                version INTEGER PRIMARY KEY,
++                applied_at INTEGER NOT NULL
++            );
++
++            CREATE TABLE IF NOT EXISTS media_jobs (
++                id TEXT PRIMARY KEY,
++                kind TEXT NOT NULL CHECK(kind IN ('video', 'audio', 'image')),
++                model TEXT NOT NULL,
++                prompt TEXT NOT NULL,
++                status TEXT NOT NULL CHECK(status IN ('queued', 'in_progress', 'completed', 'failed', 'cancelled')),
++                progress INTEGER NOT NULL DEFAULT 0 CHECK(progress >= 0 AND progress <= 100),
++                provider TEXT,
++                worker_name TEXT,
++                provider_task_id TEXT,
++                conversation_id TEXT,
++                options_json TEXT NOT NULL DEFAULT '{}',
++                input_file_ids_json TEXT NOT NULL DEFAULT '[]',
++                output_json TEXT NOT NULL DEFAULT '[]',
++                error TEXT,
++                message TEXT,
++                idempotency_key TEXT,
++                idempotency_scope TEXT NOT NULL DEFAULT 'default',
++                created_at INTEGER NOT NULL,
++                updated_at INTEGER NOT NULL,
++                expires_at INTEGER NOT NULL,
++                cancelled_at INTEGER
++            );
++
++            CREATE UNIQUE INDEX IF NOT EXISTS idx_media_jobs_idempotency
++                ON media_jobs(idempotency_scope, idempotency_key)
++                WHERE idempotency_key IS NOT NULL;
++            CREATE INDEX IF NOT EXISTS idx_media_jobs_status ON media_jobs(status, updated_at);
++            CREATE INDEX IF NOT EXISTS idx_media_jobs_expires ON media_jobs(expires_at);
++
++            CREATE TABLE IF NOT EXISTS media_files (
++                id TEXT PRIMARY KEY,
++                filename TEXT NOT NULL,
++                purpose TEXT NOT NULL,
++                mime_type TEXT NOT NULL,
++                size_bytes INTEGER NOT NULL,
++                relative_path TEXT NOT NULL,
++                created_at INTEGER NOT NULL,
++                expires_at INTEGER NOT NULL
++            );
++            CREATE INDEX IF NOT EXISTS idx_media_files_expires ON media_files(expires_at);
++        `);
++        this.db.prepare('INSERT OR IGNORE INTO media_schema(version, applied_at) VALUES(1, ?)').run(now());
++    }
++
++    _hydrateJob(row) {
++        if (!row) return null;
++        return {
++            ...row,
++            options: parseJson(row.options_json, {}),
++            input_file_ids: parseJson(row.input_file_ids_json, []),
++            outputs: parseJson(row.output_json, [])
++        };
++    }
++
++    createJob({ kind, model, prompt, options = {}, inputFileIds = [], idempotencyKey, scope = 'default', retentionSeconds }) {
++        if (idempotencyKey) {
++            const existing = this.db.prepare(
++                'SELECT * FROM media_jobs WHERE idempotency_scope = ? AND idempotency_key = ?'
++            ).get(scope, idempotencyKey);
++            if (existing) return { job: this._hydrateJob(existing), reused: true };
++        }
++
++        const createdAt = now();
++        const id = jobId(kind);
++        const expiresAt = createdAt + retentionSeconds;
++        this.db.prepare(`
++            INSERT INTO media_jobs (
++                id, kind, model, prompt, status, options_json, input_file_ids_json,
++                idempotency_key, idempotency_scope, created_at, updated_at, expires_at
++            ) VALUES (?, ?, ?, ?, 'queued', ?, ?, ?, ?, ?, ?, ?)
++        `).run(
++            id,
++            kind,
++            model,
++            prompt,
++            JSON.stringify(options),
++            JSON.stringify(inputFileIds),
++            idempotencyKey || null,
++            scope,
++            createdAt,
++            createdAt,
++            expiresAt
++        );
++        return { job: this.getJob(id), reused: false };
++    }
++
++    getJob(id) {
++        return this._hydrateJob(this.db.prepare('SELECT * FROM media_jobs WHERE id = ?').get(id));
++    }
++
++    updateJob(id, changes = {}) {
++        const fields = {
++            status: changes.status,
++            progress: changes.progress,
++            provider: changes.provider,
++            worker_name: changes.workerName,
++            provider_task_id: changes.providerTaskId,
++            conversation_id: changes.conversationId,
++            options_json: changes.options === undefined ? undefined : JSON.stringify(changes.options),
++            output_json: changes.outputs === undefined ? undefined : JSON.stringify(changes.outputs),
++            error: changes.error,
++            message: changes.message,
++            cancelled_at: changes.cancelledAt
++        };
++        const assignments = [];
++        const values = [];
++        for (const [field, value] of Object.entries(fields)) {
++            if (value === undefined) continue;
++            assignments.push(`${field} = ?`);
++            values.push(value);
++        }
++        if (assignments.length === 0) return this.getJob(id);
++        assignments.push('updated_at = ?');
++        values.push(now());
++        values.push(id);
++        this.db.prepare(`UPDATE media_jobs SET ${assignments.join(', ')} WHERE id = ?`).run(...values);
++        return this.getJob(id);
++    }
++
++    markCancelled(id) {
++        return this.updateJob(id, {
++            status: 'cancelled',
++            progress: 100,
++            cancelledAt: now(),
++            message: 'Cancelled by caller'
++        });
++    }
++
++    listRecoverableJobs() {
++        return this.db.prepare(
++            "SELECT * FROM media_jobs WHERE status IN ('queued', 'in_progress') ORDER BY created_at ASC"
++        ).all().map(row => this._hydrateJob(row));
++    }
++
++    createFile({ filename, purpose = 'user_data', mimeType, sizeBytes, relativePath, retentionSeconds }) {
++        const createdAt = now();
++        const id = `file_${crypto.randomUUID().replace(/-/g, '')}`;
++        this.db.prepare(`
++            INSERT INTO media_files (id, filename, purpose, mime_type, size_bytes, relative_path, created_at, expires_at)
++            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
++        `).run(id, filename, purpose, mimeType, sizeBytes, relativePath, createdAt, createdAt + retentionSeconds);
++        return this.getFile(id);
++    }
++
++    getFile(id) {
++        const row = this.db.prepare('SELECT * FROM media_files WHERE id = ?').get(id);
++        return row ? { ...row, absolute_path: path.join(this.mediaDir, row.relative_path) } : null;
++    }
++
++    listFiles(ids) {
++        if (!Array.isArray(ids) || ids.length === 0) return [];
++        const placeholders = ids.map(() => '?').join(', ');
++        return this.db.prepare(`SELECT * FROM media_files WHERE id IN (${placeholders})`).all(...ids)
++            .map(row => ({ ...row, absolute_path: path.join(this.mediaDir, row.relative_path) }));
++    }
++
++    /**
++     * Delete expired terminal-job output and expired uploads. Returns paths that
++     * the caller may unlink. In-progress jobs are never removed.
++     */
++    collectExpiredPaths() {
++        const timestamp = now();
++        const paths = [];
++        const jobs = this.db.prepare(`
++            SELECT id, output_json FROM media_jobs
++            WHERE expires_at < ? AND status IN ('completed', 'failed', 'cancelled')
++        `).all(timestamp);
++        for (const job of jobs) {
++            for (const output of parseJson(job.output_json, [])) {
++                if (output.relative_path) paths.push(path.join(this.mediaDir, output.relative_path));
++            }
++        }
++        this.db.prepare(`
++            DELETE FROM media_jobs
++            WHERE expires_at < ? AND status IN ('completed', 'failed', 'cancelled')
++        `).run(timestamp);
++
++        const files = this.db.prepare('SELECT relative_path FROM media_files WHERE expires_at < ?').all(timestamp);
++        for (const file of files) paths.push(path.join(this.mediaDir, file.relative_path));
++        this.db.prepare('DELETE FROM media_files WHERE expires_at < ?').run(timestamp);
++        return paths;
++    }
++
++    getStoredBytes() {
++        const walk = dir => {
++            let total = 0;
++            for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
++                const entryPath = path.join(dir, entry.name);
++                if (entry.isDirectory()) total += walk(entryPath);
++                else if (entry.isFile()) total += fs.statSync(entryPath).size;
++            }
++            return total;
++        };
++        return walk(this.mediaDir);
++    }
++
++    isTerminal(job) {
++        return TERMINAL_STATUSES.has(job?.status);
++    }
++
++    close() {
++        this.db.close();
++    }
++}
+diff --git a/src/media/MediaManager.js b/src/media/MediaManager.js
+new file mode 100644
+index 0000000..cabea8d
+--- /dev/null
++++ b/src/media/MediaManager.js
+@@ -0,0 +1,342 @@
++/**
++ * Provider-neutral asynchronous media job runner.
++ */
++
++import crypto from 'crypto';
++import fs from 'fs';
++import fsp from 'fs/promises';
++import path from 'path';
++import { Readable } from 'stream';
++import { pipeline } from 'stream/promises';
++import { JobStore } from './JobStore.js';
++
++const DEFAULT_RETENTION_SECONDS = 24 * 60 * 60;
++const DEFAULT_MAX_BYTES = 2 * 1024 * 1024 * 1024;
++const DEFAULT_MAX_UPLOAD_BYTES = 20 * 1024 * 1024;
++
++function safeFilename(name, fallback = 'media.bin') {
++    const sanitized = String(name || fallback)
++        .replace(/[^a-zA-Z0-9._-]/g, '_')
++        .replace(/^\.+/, '')
++        .slice(-120);
++    return sanitized || fallback;
++}
++
++function extensionForMime(mime, kind) {
++    if (mime?.includes('mp4')) return '.mp4';
++    if (mime?.includes('webm')) return '.webm';
++    if (mime?.includes('mpeg')) return '.mp3';
++    if (mime?.includes('wav')) return '.wav';
++    if (mime?.includes('png')) return '.png';
++    if (mime?.includes('jpeg')) return '.jpg';
++    return kind === 'video' ? '.mp4' : kind === 'audio' ? '.mp3' : '.bin';
++}
++
++function mimeForKind(kind) {
++    return kind === 'video' ? 'video/mp4' : kind === 'audio' ? 'audio/mpeg' : 'image/png';
++}
++
++function dataUrlToBuffer(value) {
++    const match = /^data:([^;,]+)?(;base64)?,(.*)$/s.exec(value || '');
++    if (!match) return null;
++    const mimeType = match[1] || 'application/octet-stream';
++    const buffer = match[2]
++        ? Buffer.from(match[3], 'base64')
++        : Buffer.from(decodeURIComponent(match[3]), 'utf8');
++    return { mimeType, buffer };
++}
++
++/**
++ * @param {object} options
++ * @param {string} options.dataDir
++ * @param {(kind: string, payload: object, model: string, meta: object) => Promise<object>} options.executeMedia
++ * @param {(workerName: string, domain?: string) => Promise<object>} options.getWorkerCookies
++ * @param {object} [options.mediaConfig]
++ * @param {object} options.logger
++ */
++export class MediaManager {
++    constructor({ dataDir, executeMedia, getWorkerCookies, mediaConfig = {}, logger }) {
++        this.dataDir = dataDir;
++        this.executeMedia = executeMedia;
++        this.getWorkerCookies = getWorkerCookies;
++        this.logger = logger;
++        this.store = new JobStore(dataDir);
++        this.retentionSeconds = mediaConfig.retentionSeconds || DEFAULT_RETENTION_SECONDS;
++        this.maxBytes = mediaConfig.maxBytes || DEFAULT_MAX_BYTES;
++        this.maxUploadBytes = mediaConfig.maxUploadBytes || DEFAULT_MAX_UPLOAD_BYTES;
++        this.pollIntervalMs = mediaConfig.pollIntervalMs || 10_000;
++        this.pollTimeoutMs = mediaConfig.pollTimeoutMs || 45 * 60 * 1000;
++        this.running = new Map();
++        this.cleanupTimer = null;
++    }
++
++    start() {
++        if (!this.cleanupTimer) {
++            this.cleanupTimer = setInterval(() => this.cleanup().catch(() => {}), 60 * 60 * 1000);
++            this.cleanupTimer.unref?.();
++        }
++        for (const job of this.store.listRecoverableJobs()) this.schedule(job.id, true);
++    }
++
++    stop() {
++        if (this.cleanupTimer) clearInterval(this.cleanupTimer);
++        this.cleanupTimer = null;
++    }
++
++    createJob(kind, request, { idempotencyKey, scope = 'default' } = {}) {
++        const { job, reused } = this.store.createJob({
++            kind,
++            model: request.model,
++            prompt: request.prompt,
++            options: request.options || {},
++            inputFileIds: request.inputFileIds || [],
++            idempotencyKey,
++            scope,
++            retentionSeconds: this.retentionSeconds
++        });
++        if (!reused) this.schedule(job.id);
++        return { job, reused };
++    }
++
++    getJob(id) {
++        return this.store.getJob(id);
++    }
++
++    formatJob(job, basePath = '/v1') {
++        if (!job) return null;
++        const output = job.outputs[0] || null;
++        const response = {
++            id: job.id,
++            object: job.kind === 'video' ? 'video' : `${job.kind}.generation`,
++            created_at: job.created_at,
++            updated_at: job.updated_at,
++            status: job.status,
++            progress: job.progress,
++            model: job.model,
++            prompt: job.prompt,
++            error: job.error ? { message: job.error, type: 'provider_error', code: 'media_generation_failed' } : undefined,
++            message: job.message || undefined
++        };
++        if (job.kind === 'video') {
++            response.content_url = job.status === 'completed' && output ? `${basePath}/videos/${job.id}/content` : undefined;
++            response.metadata = output ? { mime_type: output.mime_type, bytes: output.size_bytes } : undefined;
++        } else if (output) {
++            response.data = [{
++                url: `${basePath}/${job.kind === 'image' ? 'images' : 'audio'}/generations/${job.id}/content`,
++                mime_type: output.mime_type
++            }];
++        }
++        return Object.fromEntries(Object.entries(response).filter(([, value]) => value !== undefined));
++    }
++
++    async cancelJob(id) {
++        const job = this.store.getJob(id);
++        if (!job) return null;
++        if (this.store.isTerminal(job)) return job;
++        this.store.markCancelled(id);
++        if (job.worker_name) {
++            this.executeMedia(job.kind, { operation: 'cancel', job }, job.model, { mediaJobId: job.id })
++                .catch(error => this.logger.warn('媒体任务', `上游取消失败: ${error.message}`, { id }));
++        }
++        return this.store.getJob(id);
++    }
++
++    async saveUpload({ filename, mimeType, buffer, purpose = 'user_data' }) {
++        if (!Buffer.isBuffer(buffer)) throw new Error('上传内容无效');
++        if (buffer.length === 0) throw new Error('上传内容为空');
++        if (buffer.length > this.maxUploadBytes) throw new Error(`上传文件超过 ${Math.floor(this.maxUploadBytes / 1024 / 1024)}MB 限制`);
++
++        const storedName = `${crypto.randomUUID()}-${safeFilename(filename)}`;
++        const relativePath = path.join('uploads', storedName);
++        const outputPath = path.join(this.store.mediaDir, relativePath);
++        await fsp.writeFile(outputPath, buffer, { mode: 0o600 });
++        return this.store.createFile({
++            filename: safeFilename(filename),
++            purpose,
++            mimeType: mimeType || 'application/octet-stream',
++            sizeBytes: buffer.length,
++            relativePath,
++            retentionSeconds: this.retentionSeconds
++        });
++    }
++
++    getContent(job) {
++        if (!job?.outputs?.length) return null;
++        const output = job.outputs[0];
++        const filePath = path.join(this.store.mediaDir, output.relative_path || '');
++        if (!output.relative_path || !filePath.startsWith(this.store.mediaDir) || !fs.existsSync(filePath)) return null;
++        return { ...output, absolutePath: filePath };
++    }
++
++    schedule(id, recovering = false) {
++        if (this.running.has(id)) return this.running.get(id);
++        const running = this._run(id, recovering)
++            .catch(error => this.logger.error('媒体任务', `任务未处理异常: ${error.message}`, { id }))
++            .finally(() => this.running.delete(id));
++        this.running.set(id, running);
++        return running;
++    }
++
++    async _run(id, recovering) {
++        let job = this.store.getJob(id);
++        if (!job || job.status === 'cancelled' || this.store.isTerminal(job)) return;
++
++        try {
++            if (recovering && job.provider_task_id) {
++                this.logger.info('媒体任务', '恢复上游媒体任务', { id });
++                await this._pollUntilTerminal(job);
++                return;
++            }
++
++            this.store.updateJob(id, { status: 'in_progress', progress: 5, message: 'Submitting provider request' });
++            job = this.store.getJob(id);
++            const inputFiles = this.store.listFiles(job.input_file_ids);
++            if (inputFiles.length !== job.input_file_ids.length) {
++                throw new Error('一个或多个引用文件已过期或不存在');
++            }
++            const result = await this.executeMedia(job.kind, {
++                operation: 'create',
++                job,
++                prompt: job.prompt,
++                options: job.options,
++                inputPaths: inputFiles.map(file => file.absolute_path),
++                inputFiles
++            }, job.model, { mediaJobId: job.id });
++            await this._applyProviderResult(id, result, { submitting: true });
++        } catch (error) {
++            this.store.updateJob(id, { status: 'failed', progress: 100, error: error.message });
++            this.logger.warn('媒体任务', `任务失败: ${error.message}`, { id });
++        }
++    }
++
++    async _pollUntilTerminal(initialJob) {
++        const startedAt = Date.now();
++        let job = initialJob;
++        while (Date.now() - startedAt < this.pollTimeoutMs) {
++            job = this.store.getJob(job.id);
++            if (!job || this.store.isTerminal(job)) return;
++            if (job.status === 'cancelled') return;
++
++            const result = await this.executeMedia(job.kind, {
++                operation: 'poll',
++                job,
++                prompt: job.prompt,
++                options: job.options
++            }, job.model, { mediaJobId: job.id });
++            const terminal = await this._applyProviderResult(job.id, result, { submitting: false });
++            if (terminal) return;
++            await new Promise(resolve => setTimeout(resolve, this.pollIntervalMs));
++        }
++        this.store.updateJob(job.id, {
++            status: 'failed',
++            progress: 100,
++            error: '媒体任务轮询超时；上游任务可能仍在生成，可使用新的任务 ID 重试。'
++        });
++    }
++
++    async _applyProviderResult(id, result, { submitting }) {
++        const current = this.store.getJob(id);
++        if (!current || current.status === 'cancelled') return true;
++        if (result?.error) throw new Error(result.error);
++
++        const changes = {
++            status: result?.pending ? 'in_progress' : 'completed',
++            progress: result?.pending ? Math.max(current.progress, result.progress || 30) : 90,
++            provider: result?.adapter || current.provider,
++            workerName: result?.workerName || current.worker_name,
++            providerTaskId: result?.providerTaskId || current.provider_task_id,
++            conversationId: result?.conversationId || current.conversation_id,
++            message: result?.message || (result?.pending ? 'Provider accepted the request' : current.message)
++        };
++        this.store.updateJob(id, changes);
++
++        if (result?.pending) {
++            if (submitting && !result.providerTaskId && !result.conversationId) {
++                throw new Error('上游已接受视频但未返回可恢复的任务或会话标识');
++            }
++            if (submitting) {
++                await this._pollUntilTerminal(this.store.getJob(id));
++                return true;
++            }
++            return false;
++        }
++
++        const outputs = await this._persistOutputs(this.store.getJob(id), result || {});
++        if (outputs.length === 0) throw new Error('上游响应未包含可下载的媒体内容');
++        this.store.updateJob(id, { status: 'completed', progress: 100, outputs, error: null, message: result.message || 'Completed' });
++        return true;
++    }
++
++    async _persistOutputs(job, result) {
++        const candidates = result.outputs || result.videos || result.tracks || [];
++        const normalized = [...candidates];
++        if (result.image) normalized.push({ url: result.image, mimeType: 'image/png' });
++        if (result.audio) normalized.push({ url: result.audio, mimeType: 'audio/mpeg' });
++        const outputs = [];
++        for (const candidate of normalized.slice(0, 4)) {
++            const url = typeof candidate === 'string'
++                ? candidate
++                : candidate.url || candidate.video_url || candidate.audio_url || candidate.download_url;
++            if (!url) continue;
++            const mimeType = candidate.mimeType || candidate.mime_type || mimeForKind(job.kind);
++            outputs.push(await this._downloadOutput(job, url, mimeType));
++        }
++        return outputs;
++    }
++
++    async _downloadOutput(job, url, fallbackMimeType) {
++        const data = dataUrlToBuffer(url);
++        const extension = extensionForMime(data?.mimeType || fallbackMimeType, job.kind);
++        const relativePath = path.join('outputs', `${job.id}-${crypto.randomUUID()}${extension}`);
++        const outputPath = path.join(this.store.mediaDir, relativePath);
++        if (data) {
++            if (data.buffer.length > this.maxBytes) throw new Error('媒体输出超过容量限制');
++            await fsp.writeFile(outputPath, data.buffer, { mode: 0o600 });
++            return { relative_path: relativePath, mime_type: data.mimeType, size_bytes: data.buffer.length };
++        }
++
++        const controller = new AbortController();
++        const timeout = setTimeout(() => controller.abort(), 10 * 60 * 1000);
++        const headers = {};
++        if (job.worker_name) {
++            try {
++                const domain = new URL(url).hostname;
++                const cookieResult = await this.getWorkerCookies(job.worker_name, domain);
++                if (cookieResult?.cookies?.length) {
++                    headers.Cookie = cookieResult.cookies.map(cookie => `${cookie.name}=${cookie.value}`).join('; ');
++                }
++            } catch (error) {
++                this.logger.debug('媒体任务', `下载时无法读取浏览器 Cookie: ${error.message}`, { id: job.id });
++            }
++        }
++        try {
++            const response = await fetch(url, { headers, redirect: 'follow', signal: controller.signal });
++            if (!response.ok || !response.body) throw new Error(`媒体下载失败: HTTP ${response.status}`);
++            const declaredLength = Number(response.headers.get('content-length') || 0);
++            if (declaredLength > this.maxBytes) throw new Error('媒体输出超过容量限制');
++            await pipeline(Readable.fromWeb(response.body), fs.createWriteStream(outputPath, { mode: 0o600 }));
++            const stats = await fsp.stat(outputPath);
++            if (stats.size > this.maxBytes) {
++                await fsp.unlink(outputPath).catch(() => {});
++                throw new Error('媒体输出超过容量限制');
++            }
++            return {
++                relative_path: relativePath,
++                mime_type: response.headers.get('content-type')?.split(';')[0] || fallbackMimeType,
++                size_bytes: stats.size
++            };
++        } finally {
++            clearTimeout(timeout);
++        }
++    }
++
++    async cleanup() {
++        const paths = this.store.collectExpiredPaths();
++        for (const filePath of paths) await fsp.unlink(filePath).catch(() => {});
++        let bytes = this.store.getStoredBytes();
++        if (bytes <= this.maxBytes) return;
++        // Existing files are already covered by expiry. If an operator lowers the
++        // cap, leave live jobs intact and report rather than deleting active work.
++        this.logger.warn('媒体任务', `媒体目录超过容量上限: ${bytes}/${this.maxBytes}`);
++    }
++}
+diff --git a/src/media/index.js b/src/media/index.js
+new file mode 100644
+index 0000000..d930c47
+--- /dev/null
++++ b/src/media/index.js
+@@ -0,0 +1,2 @@
++export { JobStore } from './JobStore.js';
++export { MediaManager } from './MediaManager.js';
+diff --git a/src/server/api/openai/mediaRoutes.js b/src/server/api/openai/mediaRoutes.js
+new file mode 100644
+index 0000000..d9ad428
+--- /dev/null
++++ b/src/server/api/openai/mediaRoutes.js
+@@ -0,0 +1,237 @@
++/**
++ * OpenAI-style asynchronous media and file routes.
++ */
++
++import crypto from 'crypto';
++import fs from 'fs';
++import path from 'path';
++import { sendJson, sendApiError } from '../../respond.js';
++import { ERROR_CODES } from '../../errors.js';
++
++const MAX_JSON_BYTES = 2 * 1024 * 1024;
++
++async function readBody(req, maxBytes = MAX_JSON_BYTES) {
++    const length = Number(req.headers['content-length'] || 0);
++    if (length > maxBytes) throw new Error(`请求体超过 ${Math.floor(maxBytes / 1024 / 1024)}MB 限制`);
++    const chunks = [];
++    let total = 0;
++    for await (const chunk of req) {
++        total += chunk.length;
++        if (total > maxBytes) throw new Error(`请求体超过 ${Math.floor(maxBytes / 1024 / 1024)}MB 限制`);
++        chunks.push(chunk);
++    }
++    return Buffer.concat(chunks);
++}
++
++async function readJson(req) {
++    const body = await readBody(req);
++    try {
++        return JSON.parse(body.toString('utf8'));
++    } catch {
++        throw new Error('请求体不是有效 JSON');
++    }
++}
++
++function getModel(models, model, expectedType) {
++    if (!model || typeof model !== 'string') throw new Error('model 是必填字段');
++    const found = models().data.find(item => item.id === model);
++    if (!found) throw new Error(`模型无效/当前服务不支持: ${model}`);
++    if (expectedType && found.type !== expectedType) {
++        throw new Error(`模型 ${model} 的类型为 ${found.type}，不能用于 ${expectedType} 接口`);
++    }
++    return found;
++}
++
++function extractPrompt(data) {
++    const prompt = data.prompt ?? data.input;
++    if (typeof prompt !== 'string' || !prompt.trim()) throw new Error('prompt 或 input 是必填字段');
++    return prompt.trim();
++}
++
++function normalizeInputFiles(data) {
++    const raw = data.input_reference ?? data.input_reference_ids ?? data.reference_images ?? data.file_ids ?? [];
++    const values = Array.isArray(raw) ? raw : [raw];
++    const ids = values.map(item => typeof item === 'string' ? item : item?.file_id || item?.id).filter(Boolean);
++    if (ids.some(id => !String(id).startsWith('file_'))) throw new Error('引用图必须先通过 /v1/files 上传并使用 file_id');
++    return [...new Set(ids.map(String))];
++}
++
++function parseRange(rangeHeader, size) {
++    if (!rangeHeader) return null;
++    const match = /^bytes=(\d*)-(\d*)$/.exec(rangeHeader);
++    if (!match) return 'invalid';
++    let start = match[1] ? Number(match[1]) : 0;
++    let end = match[2] ? Number(match[2]) : size - 1;
++    if (!Number.isInteger(start) || !Number.isInteger(end) || start < 0 || end < start || start >= size) return 'invalid';
++    end = Math.min(end, size - 1);
++    return { start, end };
++}
++
++async function serveContent(req, res, mediaManager, jobId, kind) {
++    const job = mediaManager.getJob(jobId);
++    if (!job || job.kind !== kind) {
++        sendApiError(res, { code: ERROR_CODES.INVALID_MODEL, message: '媒体任务不存在' });
++        return;
++    }
++    if (job.status !== 'completed') {
++        sendJson(res, 409, mediaManager.formatJob(job));
++        return;
++    }
++    const content = mediaManager.getContent(job);
++    if (!content) {
++        sendApiError(res, { code: ERROR_CODES.GENERATION_FAILED, message: '媒体文件已过期或不可用' });
++        return;
++    }
++    const stat = await fs.promises.stat(content.absolutePath);
++    const range = parseRange(req.headers.range, stat.size);
++    if (range === 'invalid') {
++        res.writeHead(416, { 'Content-Range': `bytes */${stat.size}` });
++        res.end();
++        return;
++    }
++    const headers = {
++        'Content-Type': content.mime_type || 'application/octet-stream',
++        'Accept-Ranges': 'bytes',
++        'Cache-Control': 'private, max-age=0',
++        'Content-Disposition': `inline; filename="${path.basename(content.absolutePath)}"`
++    };
++    if (range) {
++        headers['Content-Range'] = `bytes ${range.start}-${range.end}/${stat.size}`;
++        headers['Content-Length'] = range.end - range.start + 1;
++        res.writeHead(206, headers);
++        if (req.method !== 'HEAD') fs.createReadStream(content.absolutePath, range).pipe(res);
++        else res.end();
++        return;
++    }
++    headers['Content-Length'] = stat.size;
++    res.writeHead(200, headers);
++    if (req.method !== 'HEAD') fs.createReadStream(content.absolutePath).pipe(res);
++    else res.end();
++}
++
++function parseMultipart(buffer, contentType) {
++    const boundaryMatch = /boundary=(?:"([^"]+)"|([^;\s]+))/i.exec(contentType || '');
++    if (!boundaryMatch) throw new Error('multipart 请求缺少 boundary');
++    const delimiter = Buffer.from(`--${boundaryMatch[1] || boundaryMatch[2]}`);
++    const headerSeparator = Buffer.from('\r\n\r\n');
++    const parts = [];
++    let cursor = buffer.indexOf(delimiter);
++    if (cursor < 0) throw new Error('multipart boundary 无效');
++    cursor += delimiter.length + 2;
++    while (cursor < buffer.length) {
++        const next = buffer.indexOf(delimiter, cursor);
++        if (next < 0) break;
++        const part = buffer.subarray(cursor, next - 2);
++        const headerEnd = part.indexOf(headerSeparator);
++        if (headerEnd >= 0) {
++            const headers = part.subarray(0, headerEnd).toString('utf8');
++            const body = part.subarray(headerEnd + headerSeparator.length);
++            const disposition = /content-disposition:\s*form-data;([^\r\n]+)/i.exec(headers)?.[1] || '';
++            const name = /name="([^"]+)"/i.exec(disposition)?.[1];
++            const filename = /filename="([^"]*)"/i.exec(disposition)?.[1];
++            const mimeType = /content-type:\s*([^\r\n]+)/i.exec(headers)?.[1]?.trim();
++            parts.push({ name, filename, mimeType, body });
++        }
++        cursor = next + delimiter.length;
++        if (buffer.subarray(cursor, cursor + 2).toString() === '--') break;
++        cursor += 2;
++    }
++    return parts;
++}
++
++/**
++ * @param {object} context
++ */
++export function createMediaRouter(context) {
++    const { getModels, mediaManager } = context;
++
++    async function create(kind, req, res) {
++        try {
++            const data = await readJson(req);
++            const model = getModel(getModels, data.model, kind);
++            const prompt = extractPrompt(data);
++            const options = {
++                seconds: Number(data.seconds ?? data.duration ?? 0) || undefined,
++                size: data.size || data.ratio || undefined,
++                n: Number(data.n || 1),
++                provider_options: data.provider_options || {}
++            };
++            if (options.seconds && (!Number.isInteger(options.seconds) || options.seconds < 1 || options.seconds > 30)) {
++                throw new Error('seconds 必须是 1-30 的整数');
++            }
++            const { job, reused } = mediaManager.createJob(kind, {
++                model: model.id,
++                prompt,
++                options,
++                inputFileIds: normalizeInputFiles(data)
++            }, { idempotencyKey: req.headers['idempotency-key'] });
++            sendJson(res, reused ? 200 : 202, mediaManager.formatJob(job));
++        } catch (error) {
++            sendApiError(res, { code: ERROR_CODES.INVALID_MODEL, message: error.message, status: 400 });
++        }
++    }
++
++    async function uploadFile(req, res) {
++        try {
++            const body = await readBody(req, mediaManager.maxUploadBytes + 1024 * 1024);
++            const parts = parseMultipart(body, req.headers['content-type']);
++            const filePart = parts.find(part => part.name === 'file' && part.filename !== undefined);
++            if (!filePart || !filePart.filename) throw new Error('multipart 请求必须包含 file 字段');
++            const purpose = parts.find(part => part.name === 'purpose')?.body?.toString('utf8') || 'user_data';
++            const file = await mediaManager.saveUpload({
++                filename: filePart.filename,
++                mimeType: filePart.mimeType || 'application/octet-stream',
++                buffer: filePart.body,
++                purpose
++            });
++            sendJson(res, 201, {
++                id: file.id,
++                object: 'file',
++                bytes: file.size_bytes,
++                created_at: file.created_at,
++                filename: file.filename,
++                purpose: file.purpose,
++                mime_type: file.mime_type
++            });
++        } catch (error) {
++            sendApiError(res, { code: ERROR_CODES.INVALID_MODEL, message: error.message, status: 400 });
++        }
++    }
++
++    return async function handleMediaRequest(req, res, pathname) {
++        if (req.method === 'POST' && pathname === '/files') return uploadFile(req, res);
++        if (req.method === 'POST' && (pathname === '/videos' || pathname === '/video/generations' || pathname === '/videos/generations')) {
++            return create('video', req, res);
++        }
++        if (req.method === 'POST' && pathname === '/images/generations') return create('image', req, res);
++        if (req.method === 'POST' && pathname === '/audio/generations') return create('audio', req, res);
++
++        const match = /^\/(videos|images\/generations|audio\/generations)\/([^/]+)(?:\/(content|cancel))?$/.exec(pathname);
++        if (!match) return false;
++        const kind = match[1] === 'videos' ? 'video' : match[1].startsWith('images') ? 'image' : 'audio';
++        const [, , id, action] = match;
++        if (!action && req.method === 'GET') {
++            const job = mediaManager.getJob(id);
++            if (!job || job.kind !== kind) {
++                sendApiError(res, { code: ERROR_CODES.INVALID_MODEL, message: '媒体任务不存在', status: 404 });
++                return true;
++            }
++            sendJson(res, 200, mediaManager.formatJob(job));
++            return true;
++        }
++        if (action === 'content' && (req.method === 'GET' || req.method === 'HEAD')) {
++            await serveContent(req, res, mediaManager, id, kind);
++            return true;
++        }
++        if (action === 'cancel' && req.method === 'POST') {
++            const job = await mediaManager.cancelJob(id);
++            if (!job || job.kind !== kind) {
++                sendApiError(res, { code: ERROR_CODES.INVALID_MODEL, message: '媒体任务不存在', status: 404 });
++                return true;
++            }
++            sendJson(res, 200, mediaManager.formatJob(job));
++            return true;
++        }
++        return false;
++    };
++}
+diff --git a/src/server/api/openai/parse.js b/src/server/api/openai/parse.js
+index e46b783..84484c8 100644
+--- a/src/server/api/openai/parse.js
++++ b/src/server/api/openai/parse.js
+@@ -84,6 +84,7 @@ export async function parseRequest(data, options) {
+     // 1. 解析模型参数与类型
+     let modelKey = null;
+     let isTextMode = false;
++    let modelType = 'image';
+ 
+     if (data.model) {
+         // 检查模型是否在支持列表中
+@@ -95,8 +96,21 @@ export async function parseRequest(data, options) {
+             logger.info('服务器', `触发模型: ${data.model}`, { id: requestId });
+ 
+             // 判定是否为文本模式
+-            const type = getModelType ? getModelType(data.model) : 'image';
+-            isTextMode = type === 'text';
++            modelType = getModelType ? getModelType(data.model) : 'image';
++            isTextMode = modelType === 'text';
++
++            if (modelType === 'video') {
++                return parseError(
++                    ERROR_CODES.INVALID_MODEL,
++                    `模型 ${data.model} 是视频模型，请改用 POST /v1/videos`
++                );
++            }
++            if (modelType === 'audio') {
++                return parseError(
++                    ERROR_CODES.INVALID_MODEL,
++                    `模型 ${data.model} 是音频模型，请改用 POST /v1/audio/generations`
++                );
++            }
+ 
+             if (isTextMode) {
+                 logger.info('服务器', '解析模式: 文本对话 (虚拟上下文构建)', { id: requestId });
+diff --git a/src/server/api/openai/routes.js b/src/server/api/openai/routes.js
+index bfba48d..292e0cd 100644
+--- a/src/server/api/openai/routes.js
++++ b/src/server/api/openai/routes.js
+@@ -8,6 +8,7 @@ import { logger } from '../../../utils/logger.js';
+ import { ERROR_CODES } from '../../errors.js';
+ import { sendJson, sendApiError } from '../../respond.js';
+ import { parseRequest } from './parse.js';
++import { createMediaRouter } from './mediaRoutes.js';
+ 
+ /**
+  * 创建 OpenAI API 路由处理器
+@@ -22,9 +23,12 @@ export function createOpenAIRouter(context) {
+         getModelType,
+         tempDir,
+         imageLimit,
+-        queueManager
++        queueManager,
++        mediaManager
+     } = context;
+ 
++    const handleMediaRequest = mediaManager ? createMediaRouter({ getModels, mediaManager }) : null;
++
+     /**
+      * 处理 GET /v1/models
+      */
+@@ -159,6 +163,11 @@ export function createOpenAIRouter(context) {
+     return async function handleOpenAIRequest(req, res, pathname, parsedUrl) {
+         const requestId = crypto.randomUUID().slice(0, 8);
+ 
++        if (handleMediaRequest) {
++            const handled = await handleMediaRequest(req, res, pathname);
++            if (handled !== false) return;
++        }
++
+         if (req.method === 'GET' && pathname === '/models') {
+             handleModels(res);
+         } else if (req.method === 'GET' && pathname === '/cookies') {
+diff --git a/src/server/server.js b/src/server/server.js
+index 5d964d5..995af27 100644
+--- a/src/server/server.js
++++ b/src/server/server.js
+@@ -47,6 +47,7 @@ const {
+     name: backendName,
+     initBrowser,
+     generate,
++    executeMedia,
+     TEMP_DIR,
+     getModels,
+     getImagePolicy,
+@@ -95,6 +96,20 @@ const queueManager = createQueueManager(
+     }
+ );
+ 
++const { MediaManager } = await import('../media/index.js');
++const mediaManager = new MediaManager({
++    dataDir: process.cwd() + '/data',
++    mediaConfig: config.media || {},
++    logger,
++    executeMedia: async (kind, payload, modelId, meta) => {
++        if (!queueManager.getPoolContext()) {
++            await queueManager.initializePool();
++        }
++        return await executeMedia(kind, payload, modelId, meta);
++    },
++    getWorkerCookies: async (workerName, domain) => await queueManager.getWorkerCookies(workerName, domain)
++});
++
+ // ==================== 创建路由 ====================
+ 
+ /**
+@@ -121,6 +136,7 @@ const handleRequest = createGlobalRouter({
+     tempDir: TEMP_DIR,
+     imageLimit: IMAGE_LIMIT,
+     queueManager,
++    mediaManager,
+     config,
+     loginMode: isLoginMode,
+     getSafeMode: () => ({ enabled: safeMode, reason: safeModeReason })
+@@ -152,6 +168,7 @@ async function startServer() {
+     // 预先启动工作池（失败时进入安全模式）
+     try {
+         await queueManager.initializePool();
++        mediaManager.start();
+     } catch (err) {
+         logger.error('服务器', '工作池初始化失败', { error: err.message });
+         logger.warn('服务器', '进入安全模式：WebUI 和 Admin API 可用，OpenAI API 不可用');
+diff --git a/tests/media.test.js b/tests/media.test.js
+new file mode 100644
+index 0000000..37b6e6c
+--- /dev/null
++++ b/tests/media.test.js
+@@ -0,0 +1,148 @@
++import assert from 'node:assert/strict';
++import fs from 'node:fs/promises';
++import http from 'node:http';
++import os from 'node:os';
++import path from 'node:path';
++import test from 'node:test';
++import { execFile as execFileCallback } from 'node:child_process';
++import { promisify } from 'node:util';
++
++import { MediaManager } from '../src/media/index.js';
++import { Worker } from '../src/backend/pool/Worker.js';
++import { createMediaRouter } from '../src/server/api/openai/mediaRoutes.js';
++import { parseMusicResult } from '../src/backend/adapter/doubao_audio.js';
++
++async function tempDataDir(t) {
++    const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'webai-media-test-'));
++    t.after(async () => fs.rm(dir, { recursive: true, force: true }));
++    return dir;
++}
++
++const logger = { info() {}, warn() {}, error() {}, debug() {} };
++const execFile = promisify(execFileCallback);
++
++test('media jobs are idempotent and persist data-url output outside SQLite', async t => {
++    const manager = new MediaManager({
++        dataDir: await tempDataDir(t), logger,
++        mediaConfig: { pollIntervalMs: 5, pollTimeoutMs: 500, maxBytes: 1024 * 1024 },
++        getWorkerCookies: async () => ({ cookies: [] }),
++        executeMedia: async () => ({ image: 'data:image/png;base64,aGVsbG8=' })
++    });
++    const first = manager.createJob('image', { model: 'image-test', prompt: 'hello' }, { idempotencyKey: 'same-request' });
++    const second = manager.createJob('image', { model: 'image-test', prompt: 'hello' }, { idempotencyKey: 'same-request' });
++    assert.equal(second.reused, true);
++    assert.equal(second.job.id, first.job.id);
++    await manager.running.get(first.job.id);
++    const job = manager.getJob(first.job.id);
++    assert.equal(job.status, 'completed');
++    assert.equal(job.outputs.length, 1);
++    assert.equal((await fs.readFile(manager.getContent(job).absolutePath)).toString(), 'hello');
++});
++
++test('pending video jobs poll to completion without duplicating submit', async t => {
++    let creates = 0;
++    let polls = 0;
++    const manager = new MediaManager({
++        dataDir: await tempDataDir(t), logger,
++        mediaConfig: { pollIntervalMs: 5, pollTimeoutMs: 500, maxBytes: 1024 * 1024 },
++        getWorkerCookies: async () => ({ cookies: [] }),
++        executeMedia: async (_kind, payload) => {
++            if (payload.operation === 'create') {
++                creates++;
++                return { pending: true, providerTaskId: 'provider-task', conversationId: 'conversation' };
++            }
++            polls++;
++            return { outputs: [{ video_url: 'data:video/mp4;base64,dmlkZW8=' }] };
++        }
++    });
++    const { job } = manager.createJob('video', { model: 'video-test', prompt: 'animate' });
++    await manager.running.get(job.id);
++    const completed = manager.getJob(job.id);
++    assert.equal(creates, 1);
++    assert.equal(polls, 1);
++    assert.equal(completed.status, 'completed');
++    assert.equal(completed.provider_task_id, 'provider-task');
++});
++
++test('worker page lock serializes tasks', async () => {
++    const worker = new Worker({ backend: { pool: {} } }, {
++        name: 'lock-test', type: 'test', userDataDir: '/tmp/unused', resolvedProxy: null
++    });
++    const order = [];
++    const first = worker._withPageLock(async () => {
++        order.push('first-start');
++        await new Promise(resolve => setTimeout(resolve, 20));
++        order.push('first-end');
++    });
++    const second = worker._withPageLock(async () => order.push('second'));
++    await Promise.all([first, second]);
++    assert.deepEqual(order, ['first-start', 'first-end', 'second']);
++});
++
++test('video API returns an async job and serves byte ranges after completion', async t => {
++    const manager = new MediaManager({
++        dataDir: await tempDataDir(t), logger,
++        mediaConfig: { pollIntervalMs: 5, pollTimeoutMs: 500, maxBytes: 1024 * 1024 },
++        getWorkerCookies: async () => ({ cookies: [] }),
++        executeMedia: async (_kind, payload) => payload.operation === 'create'
++            ? { pending: true, providerTaskId: 'provider-task' }
++            : { outputs: [{ video_url: 'data:video/mp4;base64,dmlkZW8=' }] }
++    });
++    const route = createMediaRouter({
++        getModels: () => ({ object: 'list', data: [{ id: 'doubao-video', type: 'video' }] }),
++        mediaManager: manager
++    });
++    const server = http.createServer(async (req, res) => {
++        const handled = await route(req, res, new URL(req.url, 'http://localhost').pathname);
++        if (handled === false) res.writeHead(404).end();
++    });
++    await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
++    t.after(() => server.close());
++    const baseUrl = `http://127.0.0.1:${server.address().port}`;
++    const created = await fetch(`${baseUrl}/videos`, {
++        method: 'POST', headers: { 'content-type': 'application/json', 'idempotency-key': 'job-key' },
++        body: JSON.stringify({ model: 'doubao-video', prompt: 'animate a cube', seconds: 5 })
++    });
++    assert.equal(created.status, 202);
++    const job = await created.json();
++    await manager.running.get(job.id);
++    const status = await (await fetch(`${baseUrl}/videos/${job.id}`)).json();
++    assert.equal(status.status, 'completed');
++    const content = await fetch(`${baseUrl}/videos/${job.id}/content`, { headers: { range: 'bytes=1-3' } });
++    assert.equal(content.status, 206);
++    assert.equal(await content.text(), 'ide');
++});
++
++test('enable script adds the worker once without rewriting existing settings', async t => {
++    const dir = await tempDataDir(t);
++    const configPath = path.join(dir, 'config.yaml');
++    await fs.writeFile(configPath, `server:\n  auth: keep-me\nbackend:\n  pool:\n    instances:\n      - name: browser_default\n        workers:\n          - name: doubao\n            type: doubao\n          - name: doubao_text\n            type: doubao_text\n          - name: chatgpt\n            type: chatgpt\n`);
++    const script = path.join(process.cwd(), 'scripts', 'enable-doubao-video.mjs');
++    await execFile(process.execPath, [script, configPath]);
++    await execFile(process.execPath, [script, configPath]);
++    const updated = await fs.readFile(configPath, 'utf8');
++    assert.equal(updated.includes('auth: keep-me'), true);
++    assert.equal((updated.match(/^\s*- name: "doubao_video"\s*$/gm) || []).length, 1);
++    assert.equal(updated.includes('          - name: chatgpt'), true);
++    assert.equal((updated.match(/^media:/gm) || []).length, 1);
++});
++
++test('Doubao music parser extracts a base64-encoded audio URL from SSE', () => {
++    const url = 'https://cdn.example.test/song.mp3';
++    const content = {
++        tasks: {
++            task: {
++                title: 'Song',
++                video_model: JSON.stringify({
++                    video_duration: 12,
++                    video_list: { normal: { main_url: Buffer.from(url).toString('base64') } }
++                })
++            }
++        }
++    };
++    const eventData = { message: { content_type: 2006, content: JSON.stringify(content) } };
++    const parsed = parseMusicResult(`data: ${JSON.stringify({ event_type: 2001, event_data: JSON.stringify(eventData) })}\n\n`);
++    assert.equal(parsed.tracks.length, 1);
++    assert.equal(parsed.tracks[0].audio_url, url);
++    assert.equal(parsed.tracks[0].duration, 12);
++});

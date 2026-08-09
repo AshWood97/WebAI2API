@@ -18,7 +18,6 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: omninode-patches
           fetch-depth: 0
 
       - uses: pnpm/action-setup@v4
@@ -34,7 +33,8 @@ jobs:
         run: |
           git remote add upstream https://github.com/foxhui/WebAI2API.git
           git fetch --no-tags upstream main
-          if test "$(git merge-base HEAD upstream/main)" = "$(git rev-parse upstream/main)"; then
+          git fetch --no-tags origin omninode-patches
+          if test "$(git merge-base origin/omninode-patches upstream/main)" = "$(git rev-parse upstream/main)"; then
             echo 'update=false' >> "$GITHUB_OUTPUT"
           else
             echo 'update=true' >> "$GITHUB_OUTPUT"
