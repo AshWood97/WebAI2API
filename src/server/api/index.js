@@ -69,7 +69,13 @@ export function createGlobalRouter(context) {
                 const ext = path.extname(filePath).toLowerCase();
                 const contentType = MIME_TYPES[ext] || 'application/octet-stream';
                 const content = fs.readFileSync(filePath);
-                res.writeHead(200, { 'Content-Type': contentType });
+                // The WebUI runs behind an authenticated iframe and is
+                // deployed in-place. Prevent a browser from retaining an old
+                // shell after its API/model catalogue has been upgraded.
+                res.writeHead(200, {
+                    'Content-Type': contentType,
+                    'Cache-Control': 'no-store, max-age=0'
+                });
                 res.end(content);
                 return;
             }
@@ -78,7 +84,10 @@ export function createGlobalRouter(context) {
             const indexPath = path.join(WEBUI_DIR, 'index.html');
             if (fs.existsSync(indexPath)) {
                 const content = fs.readFileSync(indexPath);
-                res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
+                res.writeHead(200, {
+                    'Content-Type': 'text/html; charset=utf-8',
+                    'Cache-Control': 'no-store, max-age=0'
+                });
                 res.end(content);
                 return;
             }
