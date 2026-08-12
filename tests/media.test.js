@@ -12,6 +12,8 @@ import { Worker } from '../src/backend/pool/Worker.js';
 import { createMediaRouter } from '../src/server/api/openai/mediaRoutes.js';
 import { parseMusicResult } from '../src/backend/adapter/doubao_audio.js';
 import { manifest as doubaoTextManifest, parseDoubaoTranscriptionResponse } from '../src/backend/adapter/doubao_text.js';
+import { manifest as doubaoManifest } from '../src/backend/adapter/doubao.js';
+import { registry } from '../src/backend/registry.js';
 import { parseRequest } from '../src/server/api/openai/parse.js';
 
 async function tempDataDir(t) {
@@ -189,6 +191,38 @@ test('Doubao text manifest exposes the verified webpage capabilities', () => {
     assert.deepEqual(models.get('doubao-deep-research').capabilities, ['deep_research']);
     assert.deepEqual(models.get('doubao-transcription').capabilities, ['audio_transcription']);
     assert.equal(models.get('doubao-transcription').type, 'transcription');
+});
+
+test('Doubao catalogue records verified web controls without inventing a resolution', () => {
+    const models = new Map(doubaoManifest.models.map(model => [model.id, model]));
+    const imageRatio = models.get('seedream-4.5').webParameters.find(parameter => parameter.key === 'ratio');
+    const videoRatio = models.get('seedance-2.0').webParameters.find(parameter => parameter.key === 'ratio');
+    const videoDuration = models.get('seedance-2.0').webParameters.find(parameter => parameter.key === 'duration');
+    const resolution = models.get('seedance-2.0').webParameters.find(parameter => parameter.key === 'resolution');
+
+    assert.deepEqual(imageRatio.values, ['自动', '9:16', '2:3', '3:4', '1:1', '4:3', '3:2', '16:9']);
+    assert.deepEqual(videoRatio.values, ['自动', '3:4', '4:3', '9:16', '16:9', '1:1', '21:9']);
+    assert.deepEqual(videoDuration.values, ['4s', '10s', '15s']);
+    assert.deepEqual(resolution.values, []);
+    assert.match(resolution.note, /480p、720p/);
+    assert.equal(models.has('seedream-5.0-pro'), true);
+});
+
+test('worker model entries use the configured account alias and keep provider metadata', async () => {
+    await registry.loadAll();
+    const worker = new Worker({ backend: { pool: {} } }, {
+        name: 'doubao-primary',
+        accountName: '豆包主账号',
+        type: 'doubao',
+        userDataDir: '/tmp/unused',
+        resolvedProxy: null
+    });
+    const model = worker.getModels().find(item => item.id === 'doubao/seedream-4.5');
+    assert.equal(model.account_id, '豆包主账号');
+    assert.equal(model.account_name, '豆包主账号');
+    assert.equal(model.provider, 'doubao');
+    assert.equal(model.display_name, 'Seedream 4.5');
+    assert.equal(model.web_parameters.some(parameter => parameter.key === 'ratio'), true);
 });
 
 test('chat completions reject transcription models with the dedicated endpoint', async () => {

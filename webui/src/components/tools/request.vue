@@ -16,7 +16,10 @@ import {
     RedoOutlined,
     InboxOutlined,
     LoadingOutlined,
-    CopyOutlined
+    CopyOutlined,
+    AppstoreOutlined,
+    UserOutlined,
+    AudioOutlined
 } from '@ant-design/icons-vue';
 import { message, Modal } from 'ant-design-vue';
 
@@ -60,17 +63,96 @@ const mediaCache = ref({});
 
 // 发送请求相关
 const sendModelList = ref([]);
+const sendProvider = ref('doubao');
+const sendAccount = ref('');
 const sendModel = ref('');
 const sendPrompt = ref('');
 const sendImageList = ref([]);
+const sendAudioFile = ref(null);
 const sendStreamMode = ref(false);
 const sendReasoningMode = ref(true);
 const sending = ref(false);
 
+const modelProviderId = (model) => model?.provider || model?.owned_by || 'other';
+const modelProviderName = (model) => model?.provider_name || modelProviderId(model);
+const modelAccountId = (model) => model?.account_id || model?.owned_by || 'default';
+const modelAccountName = (model) => model?.account_name || modelAccountId(model);
+const isScopedModel = (model) => Boolean(model?.adapter && model.id?.startsWith(`${model.adapter}/`));
+
+const sendProviderOptions = computed(() => {
+    const providers = new Map();
+    for (const model of sendModelList.value.filter(isScopedModel)) {
+        const id = modelProviderId(model);
+        if (!providers.has(id)) providers.set(id, { id, name: modelProviderName(model) });
+    }
+    return [...providers.values()].sort((a, b) => (a.id === 'doubao' ? -1 : b.id === 'doubao' ? 1 : a.name.localeCompare(b.name)));
+});
+
+const providerModels = computed(() => sendModelList.value.filter(model => (
+    isScopedModel(model) && modelProviderId(model) === sendProvider.value
+)));
+
+const sendAccountOptions = computed(() => {
+    const accounts = new Map();
+    for (const model of providerModels.value) {
+        const id = modelAccountId(model);
+        if (!accounts.has(id)) accounts.set(id, { id, name: modelAccountName(model) });
+    }
+    return [...accounts.values()];
+});
+
+const accountModels = computed(() => providerModels.value.filter(model => modelAccountId(model) === sendAccount.value));
+const selectedSendModel = computed(() => sendModelList.value.find(model => model.id === sendModel.value) || null);
+const selectedModelType = computed(() => selectedSendModel.value?.type || 'text');
+const selectedModelParameters = computed(() => selectedSendModel.value?.web_parameters || []);
+const selectedModelCapabilities = computed(() => selectedSendModel.value?.capabilities || []);
+const currentModelIsTranscription = computed(() => selectedModelType.value === 'transcription');
+const currentModelIsMedia = computed(() => ['video', 'audio'].includes(selectedModelType.value));
+const currentModelUsesTextOptions = computed(() => selectedModelType.value === 'text');
+
+const parameterSourceName = (source) => ({ web: '网页已验证', adapter: '适配器支持', api: '接口参数' }[source] || '已声明');
+const modelTypeName = (type) => ({ text: '文本', image: '图片', video: '视频', audio: '音乐', transcription: '转写' }[type] || type);
+
+const selectFirstAvailableModel = () => {
+    if (accountModels.value.some(model => model.id === sendModel.value)) return;
+    sendModel.value = accountModels.value[0]?.id || '';
+};
+
+const initializeRequestPath = () => {
+    const providers = sendProviderOptions.value;
+    if (!providers.length) return;
+    if (!providers.some(provider => provider.id === sendProvider.value)) {
+        sendProvider.value = providers.find(provider => provider.id === 'doubao')?.id || providers[0].id;
+    }
+    const accounts = sendAccountOptions.value;
+    if (!accounts.some(account => account.id === sendAccount.value)) {
+        sendAccount.value = accounts[0]?.id || '';
+    }
+    selectFirstAvailableModel();
+};
+
+watch(sendProvider, () => {
+    const accounts = sendAccountOptions.value;
+    if (!accounts.some(account => account.id === sendAccount.value)) {
+        sendAccount.value = accounts[0]?.id || '';
+    }
+    selectFirstAvailableModel();
+});
+
+watch(sendAccount, selectFirstAvailableModel);
+
+watch(sendModel, (modelId) => {
+    sendImageList.value = [];
+    sendAudioFile.value = null;
+    const model = sendModelList.value.find(item => item.id === modelId);
+    if (!model) return;
+    if (modelProviderId(model) !== sendProvider.value) sendProvider.value = modelProviderId(model);
+    if (modelAccountId(model) !== sendAccount.value) sendAccount.value = modelAccountId(model);
+});
+
 // 当前模型是否支持图片输入
 const currentModelSupportsImage = computed(() => {
-    if (!sendModel.value) return false;
-    const model = sendModelList.value.find(m => m.id === sendModel.value);
+    const model = selectedSendModel.value;
     if (!model) return false;
     return model.image_policy !== 'forbidden';
 });
@@ -435,11 +517,6 @@ watch([statusFilter, modelFilter, dateRange], () => {
     fetchStats();
 });
 
-// 切换模型时清空已选图片
-watch(sendModel, () => {
-    sendImageList.value = [];
-});
-
 // 搜索防抖
 let searchTimeout = null;
 watch(searchText, () => {
@@ -564,9 +641,7 @@ const fetchSendModelList = async () => {
         if (res.ok) {
             const data = await res.json();
             sendModelList.value = data.data || [];
-            if (sendModelList.value.length > 0 && !sendModel.value) {
-                sendModel.value = sendModelList.value[0].id;
-            }
+            initializeRequestPath();
         }
     } catch (e) {
         console.error('获取模型列表失败', e);
@@ -606,61 +681,129 @@ const handleSendImageChange = async (info) => {
     }
     try {
         const base64 = await fileToBase64(file.originFileObj || file);
-        sendImageList.value.push({ uid: file.uid, name: file.name, base64 });
+        sendImageList.value.push({ uid: file.uid, name: file.name, base64, file: file.originFileObj || file });
     } catch (e) {
         message.error('图片读取失败');
     }
 };
 
-// 发送请求（fire-and-forget，不阻塞 UI）
-const sendRequest = () => {
-    if (!sendModel.value) {
-        message.warning('请选择模型');
+const beforeAudioUpload = (file) => {
+    if (!file.type?.startsWith('audio/')) {
+        message.error('请选择音频文件');
+        return false;
+    }
+    return false;
+};
+
+const handleSendAudioChange = (info) => {
+    if (info.file.status === 'removed') {
+        sendAudioFile.value = null;
         return;
     }
-    if (!sendPrompt.value.trim()) {
-        message.warning('请输入提示词');
-        return;
-    }
+    sendAudioFile.value = info.file.originFileObj || info.file;
+};
 
-    let content;
-    if (sendImageList.value.length > 0) {
-        content = [{ type: 'text', text: sendPrompt.value }];
-        for (const img of sendImageList.value) {
-            content.push({ type: 'image_url', image_url: { url: img.base64 } });
-        }
-    } else {
-        content = sendPrompt.value;
+const responseError = async (res) => {
+    try {
+        const data = await res.json();
+        return data?.error?.message || data?.message || '请求失败';
+    } catch {
+        return `请求失败 (${res.status})`;
     }
+};
 
+const uploadMediaReferences = async () => Promise.all(sendImageList.value.map(async (image) => {
+    const form = new FormData();
+    form.append('file', image.file);
+    form.append('purpose', 'vision');
+    const res = await fetch('/v1/files', { method: 'POST', headers: settingsStore.getHeaders(), body: form });
+    if (!res.ok) throw new Error(await responseError(res));
+    return (await res.json()).id;
+}));
+
+const sendChatRequest = async () => {
+    const content = sendImageList.value.length > 0
+        ? [
+            { type: 'text', text: sendPrompt.value },
+            ...sendImageList.value.map(image => ({ type: 'image_url', image_url: { url: image.base64 } }))
+        ]
+        : sendPrompt.value;
     const body = {
         model: sendModel.value,
         messages: [{ role: 'user', content }],
         stream: sendStreamMode.value
     };
-    if (sendReasoningMode.value) {
-        body.reasoning = true;
-    }
-
-    // 发射后不等待
-    fetch('/v1/chat/completions', {
+    if (sendReasoningMode.value) body.reasoning = true;
+    const res = await fetch('/v1/chat/completions', {
         method: 'POST',
         headers: { ...settingsStore.getHeaders(), 'Content-Type': 'application/json' },
         body: JSON.stringify(body)
-    }).catch(() => { /* 网络错误静默处理，列表会显示失败状态 */ });
+    });
+    if (!res.ok) throw new Error(await responseError(res));
+};
 
-    message.success('请求已发送');
+const sendMediaRequest = async () => {
+    const type = selectedModelType.value;
+    if (type === 'transcription') {
+        const form = new FormData();
+        form.append('model', sendModel.value);
+        form.append('file', sendAudioFile.value);
+        const res = await fetch('/v1/audio/transcriptions', { method: 'POST', headers: settingsStore.getHeaders(), body: form });
+        if (!res.ok) throw new Error(await responseError(res));
+        const data = await res.json();
+        message.success(data.text ? '录音转写完成' : '录音转写已提交');
+        return;
+    }
 
-    // 清空输入，允许立即发下一个
-    sendPrompt.value = '';
-    sendImageList.value = [];
+    const body = { model: sendModel.value, prompt: sendPrompt.value };
+    if (type === 'video' && sendImageList.value.length > 0) {
+        body.input_reference = await uploadMediaReferences();
+    }
+    const endpoint = type === 'video' ? '/v1/videos' : '/v1/audio/generations';
+    const res = await fetch(endpoint, {
+        method: 'POST',
+        headers: { ...settingsStore.getHeaders(), 'Content-Type': 'application/json' },
+        body: JSON.stringify(body)
+    });
+    if (!res.ok) throw new Error(await responseError(res));
+};
 
-    // 启动自动刷新 + 1秒后立即刷一次以快速显示新记录
-    startAutoRefresh();
-    setTimeout(() => {
-        silentFetchHistory();
-        silentFetchStats();
-    }, 1000);
+// 发送请求
+const sendRequest = async () => {
+    if (!sendModel.value) {
+        message.warning('请选择模型');
+        return;
+    }
+    if (currentModelIsTranscription.value && !sendAudioFile.value) {
+        message.warning('请上传音频文件');
+        return;
+    }
+    if (!currentModelIsTranscription.value && !sendPrompt.value.trim()) {
+        message.warning('请输入提示词');
+        return;
+    }
+    sending.value = true;
+    try {
+        if (currentModelIsMedia.value || currentModelIsTranscription.value) {
+            await sendMediaRequest();
+            if (!currentModelIsTranscription.value) message.success('媒体任务已提交');
+        } else {
+            await sendChatRequest();
+            message.success('请求已发送');
+            startAutoRefresh();
+            setTimeout(() => {
+                silentFetchHistory();
+                silentFetchStats();
+            }, 1000);
+        }
+        sendPrompt.value = '';
+        sendImageList.value = [];
+        sendAudioFile.value = null;
+    } catch (error) {
+        message.error(error.message || '请求发送失败');
+    } finally {
+        sending.value = false;
+    }
 };
 
 // 静默删除记录（不弹确认框）
@@ -681,7 +824,9 @@ const silentDeleteRecord = async (id) => {
 const resendFromRecord = (record) => {
     const modelId = record.model_id || record.model_name;
     if (modelId) {
-        sendModel.value = modelId;
+        const matchingModel = sendModelList.value.find(model => model.id === modelId)
+            || sendModelList.value.find(model => model.id.endsWith(`/${modelId}`));
+        sendModel.value = matchingModel?.id || modelId;
     }
     if (record.prompt) {
         sendPrompt.value = record.prompt;
@@ -764,30 +909,74 @@ onUnmounted(() => {
 <template>
     <!-- 发送请求 -->
     <a-card title="发送请求" :bordered="false" style="margin-bottom: 24px">
-        <div style="display: flex; gap: 16px; flex-wrap: wrap;">
-            <!-- 左侧：模型 + 提示词 -->
-            <div style="flex: 1; min-width: 280px;">
-                <!-- 模型选择 -->
-                <div style="margin-bottom: 12px;">
-                    <div style="font-size: 12px; color: #8c8c8c; margin-bottom: 4px;">模型</div>
-                    <a-select v-model:value="sendModel" style="width: 100%" size="small" placeholder="选择模型" show-search>
-                        <a-select-option v-for="model in sendModelList" :key="model.id" :value="model.id">
-                            {{ model.id }}
-                        </a-select-option>
-                    </a-select>
-                </div>
+        <div class="request-path" aria-label="模型请求路径">
+            <div class="request-path-step">
+                <div class="request-path-label"><AppstoreOutlined /> 平台</div>
+                <a-select v-model:value="sendProvider" size="small" :options="sendProviderOptions.map(provider => ({ value: provider.id, label: provider.name }))" />
+            </div>
+            <div class="request-path-step">
+                <div class="request-path-label"><UserOutlined /> 账户别名</div>
+                <a-select v-model:value="sendAccount" size="small" :options="sendAccountOptions.map(account => ({ value: account.id, label: account.name }))" />
+            </div>
+            <div class="request-path-step">
+                <div class="request-path-label"><RocketOutlined /> 模型</div>
+                <a-select v-model:value="sendModel" size="small" placeholder="选择模型" show-search>
+                    <a-select-option v-for="model in accountModels" :key="model.id" :value="model.id">
+                        {{ model.display_name || model.id }}
+                    </a-select-option>
+                </a-select>
+            </div>
+        </div>
 
+        <section v-if="selectedSendModel" class="selected-model-summary" aria-label="模型参数">
+            <div class="selected-model-heading">
+                <div>
+                    <strong>{{ selectedSendModel.display_name || selectedSendModel.id }}</strong>
+                    <span class="model-id">{{ selectedSendModel.id }}</span>
+                </div>
+                <a-space size="small" wrap>
+                    <a-tag color="blue">{{ modelTypeName(selectedModelType) }}</a-tag>
+                    <a-tag v-for="capability in selectedModelCapabilities" :key="capability" color="cyan">{{ capability }}</a-tag>
+                </a-space>
+            </div>
+            <a-descriptions v-if="selectedModelParameters.length" size="small" :column="isMobile ? 1 : 2" bordered>
+                <a-descriptions-item v-for="parameter in selectedModelParameters" :key="parameter.key" :label="parameter.label">
+                    <div class="parameter-value-list">
+                        <a-tag v-for="value in parameter.values" :key="value" :color="parameter.source === 'web' ? 'green' : 'default'">
+                            {{ value }}
+                        </a-tag>
+                        <span v-if="parameter.note" class="parameter-note">{{ parameter.note }}</span>
+                        <span class="parameter-source">{{ parameterSourceName(parameter.source) }}</span>
+                    </div>
+                </a-descriptions-item>
+            </a-descriptions>
+        </section>
+
+        <div class="request-composer">
+            <!-- 左侧：模型 + 提示词 -->
+            <div class="request-prompt-column">
                 <!-- 提示词 -->
-                <div style="margin-bottom: 12px;">
+                <div v-if="!currentModelIsTranscription" style="margin-bottom: 12px;">
                     <div style="font-size: 12px; color: #8c8c8c; margin-bottom: 4px;">提示词</div>
                     <a-textarea v-model:value="sendPrompt" placeholder="输入提示词" :rows="3" size="small" />
                 </div>
 
+                <div v-else class="audio-upload-wrap">
+                    <div style="font-size: 12px; color: #8c8c8c; margin-bottom: 4px;">录音文件</div>
+                    <a-upload-dragger :file-list="[]" :before-upload="beforeAudioUpload" @change="handleSendAudioChange" accept="audio/*" :show-upload-list="false">
+                        <p style="margin: 0;"><AudioOutlined style="font-size: 20px; color: #1890ff;" /></p>
+                        <p style="font-size: 12px; margin: 2px 0 0; color: #8c8c8c;">点击或拖拽上传音频</p>
+                    </a-upload-dragger>
+                    <a-tag v-if="sendAudioFile" closable style="margin-top: 8px;" @close="sendAudioFile = null">
+                        <AudioOutlined /> {{ sendAudioFile.name }}
+                    </a-tag>
+                </div>
+
                 <!-- 选项 + 发送按钮 -->
                 <div style="display: flex; align-items: center; gap: 16px; flex-wrap: wrap;">
-                    <a-checkbox v-model:checked="sendStreamMode">流式响应</a-checkbox>
-                    <a-checkbox v-model:checked="sendReasoningMode">返回思考</a-checkbox>
-                    <a-button type="primary" @click="sendRequest" :disabled="!sendModel">
+                    <a-checkbox v-if="currentModelUsesTextOptions" v-model:checked="sendStreamMode">流式响应</a-checkbox>
+                    <a-checkbox v-if="currentModelUsesTextOptions" v-model:checked="sendReasoningMode">返回思考</a-checkbox>
+                    <a-button type="primary" @click="sendRequest" :loading="sending" :disabled="!sendModel">
                         <template #icon><RocketOutlined /></template>
                         发送
                     </a-button>
@@ -797,7 +986,7 @@ onUnmounted(() => {
             <!-- 右侧：图片上传（仅支持图片的模型显示） -->
             <div v-if="currentModelSupportsImage" class="send-upload-area">
                 <div style="font-size: 12px; color: #8c8c8c; margin-bottom: 4px;">
-                    附加图片 ({{ sendImageList.length }}/10)
+                    {{ selectedModelType === 'video' ? '参考图' : '附加图片' }} ({{ sendImageList.length }}/10)
                 </div>
                 <a-upload-dragger :file-list="[]" :multiple="true" :before-upload="beforeUpload"
                     @change="handleSendImageChange" accept=".png,.jpg,.jpeg,.gif,.webp" :show-upload-list="false">
@@ -1132,6 +1321,89 @@ onUnmounted(() => {
 </template>
 
 <style scoped>
+.request-path {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(180px, 1fr));
+    gap: 12px;
+    padding-bottom: 14px;
+    border-bottom: 1px solid #f0f0f0;
+}
+
+.request-path-step {
+    min-width: 0;
+}
+
+.request-path-step :deep(.ant-select) {
+    width: 100%;
+}
+
+.request-path-label {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-bottom: 5px;
+    color: #595959;
+    font-size: 12px;
+}
+
+.selected-model-summary {
+    margin: 14px 0;
+    padding: 12px;
+    border: 1px solid #e6f4ff;
+    border-radius: 6px;
+    background: #f8fcff;
+}
+
+.selected-model-heading {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 12px;
+    margin-bottom: 10px;
+}
+
+.model-id {
+    display: block;
+    margin-top: 2px;
+    color: #8c8c8c;
+    font-family: 'SF Mono', 'Monaco', monospace;
+    font-size: 11px;
+    overflow-wrap: anywhere;
+}
+
+.parameter-value-list {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 4px;
+    min-width: 0;
+}
+
+.parameter-note {
+    color: #8c8c8c;
+    font-size: 12px;
+}
+
+.parameter-source {
+    color: #8c8c8c;
+    font-size: 11px;
+}
+
+.request-composer {
+    display: flex;
+    gap: 16px;
+    flex-wrap: wrap;
+}
+
+.request-prompt-column {
+    flex: 1;
+    min-width: 280px;
+}
+
+.audio-upload-wrap :deep(.ant-upload-drag) {
+    min-height: 86px;
+}
+
 /* 图片上传区域高度控制 */
 .send-upload-area :deep(.ant-upload-drag) {
     height: calc(100% - 20px);
@@ -1228,6 +1500,16 @@ onUnmounted(() => {
     .toolbar-row:last-child {
         flex: 1;
         max-width: 300px;
+    }
+}
+
+@media (max-width: 767px) {
+    .request-path {
+        grid-template-columns: 1fr;
+    }
+
+    .selected-model-heading {
+        flex-direction: column;
     }
 }
 

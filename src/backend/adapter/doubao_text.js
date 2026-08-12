@@ -14,6 +14,11 @@ import {
     gotoWithCheck
 } from '../utils/index.js';
 import { logger } from '../../utils/logger.js';
+import {
+    DOUBAO_PROVIDER,
+    DOUBAO_TEXT_PARAMETERS,
+    DOUBAO_TRANSCRIPTION_PARAMETERS
+} from './doubao_catalog.js';
 
 // --- 配置常量 ---
 const TARGET_URL = 'https://www.doubao.com/chat/';
@@ -518,6 +523,8 @@ export async function transcribe(context, payload, modelId, meta = {}) {
 export const manifest = {
     id: 'doubao_text',
     displayName: '豆包 (文本生成)',
+    provider: DOUBAO_PROVIDER.id,
+    providerName: DOUBAO_PROVIDER.displayName,
     description: '使用字节跳动豆包生成文本，支持专家、工作任务 Turbo、深入研究和录音转写。需要已登录的豆包账户。',
 
     getTargetUrl(config, workerConfig) {
@@ -525,12 +532,12 @@ export const manifest = {
     },
 
     models: [
-        { id: 'seed', imagePolicy: 'optional', type: 'text' },
-        { id: 'seed-thinking', imagePolicy: 'optional', type: 'text' },
-        { id: 'seed-pro', imagePolicy: 'optional', type: 'text', capabilities: ['expert_mode'] },
-        { id: 'doubao-work-task-turbo', imagePolicy: 'optional', type: 'text', capabilities: ['work_task_turbo'] },
-        { id: 'doubao-deep-research', imagePolicy: 'optional', type: 'text', capabilities: ['deep_research'] },
-        { id: 'doubao-transcription', imagePolicy: 'forbidden', type: 'transcription', capabilities: ['audio_transcription'] }
+        { id: 'seed', displayName: '豆包快速', imagePolicy: 'optional', type: 'text', webParameters: DOUBAO_TEXT_PARAMETERS },
+        { id: 'seed-thinking', displayName: '豆包思考', imagePolicy: 'optional', type: 'text', webParameters: DOUBAO_TEXT_PARAMETERS },
+        { id: 'seed-pro', displayName: '豆包专家', imagePolicy: 'optional', type: 'text', capabilities: ['expert_mode'], webParameters: DOUBAO_TEXT_PARAMETERS },
+        { id: 'doubao-work-task-turbo', displayName: '工作任务 Turbo', imagePolicy: 'optional', type: 'text', capabilities: ['work_task_turbo'], webParameters: DOUBAO_TEXT_PARAMETERS },
+        { id: 'doubao-deep-research', displayName: '深入研究', imagePolicy: 'optional', type: 'text', capabilities: ['deep_research'], webParameters: DOUBAO_TEXT_PARAMETERS },
+        { id: 'doubao-transcription', displayName: '录音转写', imagePolicy: 'forbidden', type: 'transcription', capabilities: ['audio_transcription'], webParameters: DOUBAO_TRANSCRIPTION_PARAMETERS }
     ],
 
     navigationHandlers: [],

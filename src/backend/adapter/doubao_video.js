@@ -10,6 +10,7 @@ import crypto from 'crypto';
 import { safeClick, sleep, uploadFilesViaChooser } from '../engine/utils.js';
 import { gotoWithCheck } from '../utils/index.js';
 import { logger } from '../../utils/logger.js';
+import { DOUBAO_PROVIDER, DOUBAO_VIDEO_PARAMETERS } from './doubao_catalog.js';
 
 const TARGET_URL = 'https://www.doubao.com/chat/';
 const VIDEO_URL_PATTERN = /(?:\.mp4|\.m3u8|\/video\/|douyinvod|video_gen|mime_type=video_mp4)/i;
@@ -355,12 +356,14 @@ async function generate() {
 export const manifest = {
     id: 'doubao_video',
     displayName: '豆包视频（Seedance）',
+    provider: DOUBAO_PROVIDER.id,
+    providerName: DOUBAO_PROVIDER.displayName,
     description: '复用已登录的豆包 Web 页面创建和轮询 Seedance 视频任务。',
     getTargetUrl() { return TARGET_URL; },
     models: [
-        { id: 'doubao-video', imagePolicy: 'optional', type: 'video', capabilities: ['text_to_video', 'image_to_video', 'async'] },
-        { id: 'seedance-2.0', imagePolicy: 'optional', type: 'video', capabilities: ['text_to_video', 'image_to_video', 'async'] },
-        { id: 'seedance-2.0-fast', imagePolicy: 'optional', type: 'video', capabilities: ['text_to_video', 'image_to_video', 'async'] }
+        { id: 'doubao-video', displayName: '豆包视频（Seedance 2.0）', imagePolicy: 'optional', type: 'video', capabilities: ['text_to_video', 'image_to_video', 'async'], webParameters: DOUBAO_VIDEO_PARAMETERS },
+        { id: 'seedance-2.0', displayName: 'Seedance 2.0', imagePolicy: 'optional', type: 'video', capabilities: ['text_to_video', 'image_to_video', 'async'], webParameters: DOUBAO_VIDEO_PARAMETERS },
+        { id: 'seedance-2.0-fast', displayName: 'Seedance 2.0 Fast', imagePolicy: 'optional', type: 'video', capabilities: ['text_to_video', 'image_to_video', 'async'], webParameters: DOUBAO_VIDEO_PARAMETERS }
     ],
     navigationHandlers: [],
     generate,

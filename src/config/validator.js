@@ -206,6 +206,10 @@ export function validateInstancesConfig(data) {
                     errors.push(`${wPrefix}: type "${w.type}" 不是有效的适配器类型`);
                 }
 
+                if (w.accountName !== undefined && typeof w.accountName !== 'string') {
+                    errors.push(`${wPrefix}: accountName 必须是字符串`);
+                }
+
                 // merge 类型特殊校验
                 if (w.type === 'merge') {
                     if (!w.mergeTypes || !Array.isArray(w.mergeTypes) || w.mergeTypes.length === 0) {

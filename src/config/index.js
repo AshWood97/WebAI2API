@@ -178,6 +178,7 @@ function flattenInstancesToWorkers(instances, globalProxy) {
                 // Worker 自身属性
                 name: worker.name,
                 type: worker.type,
+                accountName: worker.accountName || worker.account_name || null,
                 mergeTypes: worker.mergeTypes || [],
                 mergeMonitor: worker.mergeMonitor || null,
 

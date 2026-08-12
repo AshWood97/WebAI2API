@@ -18,7 +18,7 @@ const __dirname = path.dirname(__filename);
 const ADAPTER_DIR = path.join(__dirname, 'adapter');
 // Helper modules live alongside adapters so a provider can share its web
 // protocol implementation without creating another runtime adapter.
-const AUXILIARY_MODULES = new Set(['doubao_audio.js']);
+const AUXILIARY_MODULES = new Set(['doubao_audio.js', 'doubao_catalog.js']);
 
 /**
  * 图片输入策略枚举
@@ -239,7 +239,12 @@ class AdapterRegistry {
                 owned_by: id,
                 image_policy: m.imagePolicy,
                 type: m.type || 'image',
-                capabilities: m.capabilities || []
+                capabilities: m.capabilities || [],
+                adapter: id,
+                provider: adapter.provider || id,
+                provider_name: adapter.providerName || adapter.displayName || id,
+                display_name: m.displayName || m.codeName || m.id,
+                web_parameters: m.webParameters || []
             }));
 
         return { object: 'list', data };

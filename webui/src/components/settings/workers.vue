@@ -276,6 +276,7 @@ const editingWorkerIndex = ref(-1);
 const workerFormVisible = ref(false);
 const workerForm = ref({
     name: '',
+    accountName: '',
     type: 'lmarena',
     mergeTypes: [],
     mergeMonitor: ''
@@ -287,6 +288,7 @@ const handleAddWorker = () => {
     const randomSuffix = Math.random().toString(36).substring(2, 7);
     workerForm.value = {
         name: `worker-${editForm.value.workers.length + 1}-${randomSuffix}`,
+        accountName: '',
         type: 'lmarena',
         mergeTypes: [],
         mergeMonitor: ''
@@ -300,6 +302,7 @@ const handleEditWorker = (index) => {
     const worker = editForm.value.workers[index];
     workerForm.value = {
         name: worker.name,
+        accountName: worker.accountName || '',
         type: worker.type,
         mergeTypes: worker.mergeTypes ? [...worker.mergeTypes] : [],
         mergeMonitor: worker.mergeMonitor || ''
@@ -570,6 +573,7 @@ const handleRemoveWorker = (index) => {
                                     <div style="font-weight: 600;">{{ item.name }}</div>
                                     <div style="font-size: 12px; color: #8c8c8c;">
                                         类型: {{ getAdapterDisplayName(item.type) }}
+                                        <span v-if="item.accountName"> | 账户别名: {{ item.accountName }}</span>
                                         <span v-if="item.type === 'merge'">
                                             | 聚合: {{ item.mergeTypes?.map(getAdapterDisplayName).join(', ') || '无' }}
                                             <span v-if="item.mergeMonitor">
@@ -602,6 +606,11 @@ const handleRemoveWorker = (index) => {
                     * 名称必须全局唯一，不可重复
                 </div>
                 <a-input v-model:value="workerForm.name" placeholder="例如: default" />
+            </div>
+
+            <div style="margin-bottom: 16px;">
+                <div style="font-weight: 600; margin-bottom: 4px;">账户别名</div>
+                <a-input v-model:value="workerForm.accountName" placeholder="例如: 豆包主账号" />
             </div>
 
             <div style="margin-bottom: 16px;">

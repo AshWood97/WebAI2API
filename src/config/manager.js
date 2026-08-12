@@ -190,6 +190,7 @@ export function getInstancesConfig() {
         workers: (inst.workers || []).map(w => ({
             name: w.name,
             type: w.type,
+            accountName: w.accountName || w.account_name || '',
             mergeTypes: w.mergeTypes || [],
             mergeMonitor: w.mergeMonitor || null
         }))
@@ -232,6 +233,7 @@ export function saveInstancesConfig(data) {
                 name: w.name,
                 type: w.type
             };
+            if (w.accountName?.trim()) worker.accountName = w.accountName.trim();
             if (w.type === 'merge' && w.mergeTypes) {
                 worker.mergeTypes = w.mergeTypes;
                 if (w.mergeMonitor) worker.mergeMonitor = w.mergeMonitor;

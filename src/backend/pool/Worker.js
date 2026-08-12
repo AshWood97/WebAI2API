@@ -25,6 +25,11 @@ export class Worker {
         this.name = workerConfig.name;
         this.type = workerConfig.type;
         this.instanceName = workerConfig.instanceName || null;
+        // This is an operator-controlled label, never browser profile data.
+        // Falling back to the worker name keeps the model catalogue useful
+        // without exposing an email, phone number, cookie, or profile path.
+        this.accountName = workerConfig.accountName || workerConfig.account_name || this.name;
+        this.accountId = this.accountName;
         this.userDataDir = workerConfig.userDataDir;
         this.proxyConfig = workerConfig.resolvedProxy;
         this.globalConfig = globalConfig;
@@ -665,6 +670,11 @@ export class Worker {
      * 获取支持的模型列表
      */
     getModels() {
+        const withAccount = model => ({
+            ...model,
+            account_id: this.accountId,
+            account_name: this.accountName
+        });
         if (this.type === 'merge') {
             const allModels = [];
             const seenIds = new Set();
@@ -675,7 +685,7 @@ export class Worker {
                     for (const m of result.data) {
                         if (!seenIds.has(m.id)) {
                             seenIds.add(m.id);
-                            allModels.push({ ...m, owned_by: 'internal_server' });
+                            allModels.push(withAccount({ ...m, owned_by: 'internal_server' }));
                         }
                     }
                 }
@@ -685,11 +695,11 @@ export class Worker {
                 const result = registry.getModelsForAdapter(type);
                 if (result?.data) {
                     for (const m of result.data) {
-                        allModels.push({
+                        allModels.push(withAccount({
                             ...m,
                             id: `${type}/${m.id}`,
                             owned_by: type
-                        });
+                        }));
                     }
                 }
             }
@@ -701,15 +711,15 @@ export class Worker {
             const allModels = [];
 
             for (const m of models) {
-                allModels.push({ ...m, owned_by: 'internal_server' });
+                allModels.push(withAccount({ ...m, owned_by: 'internal_server' }));
             }
 
             for (const m of models) {
-                allModels.push({
+                allModels.push(withAccount({
                     ...m,
                     id: `${this.type}/${m.id}`,
                     owned_by: this.type
-                });
+                }));
             }
 
             return allModels;
