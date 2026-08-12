@@ -18,6 +18,104 @@ import { logger } from '../../utils/logger.js';
 // --- 配置常量 ---
 const TARGET_URL = 'https://www.doubao.com/chat/';
 
+const TEXT_MODELS = Object.freeze({
+    'seed': { kind: 'model', menu: /Fast Solves most questions|快速 适用于大部分情况|快速 適用於大部分情況/ },
+    'seed-thinking': { kind: 'model', menu: /Think Solves more complex problems|思考 擅长解决更难的问题|思考 擅長解決更難的問題/ },
+    'seed-pro': { kind: 'model', menu: /Pro Advanced Pro model|专家 研究级智能模型|專家 研究級智慧模型/ },
+    'doubao-work-task-turbo': { kind: 'work_task_turbo' },
+    'doubao-deep-research': { kind: 'deep_research' }
+});
+
+const TRANSCRIPTION_MODEL_ID = 'doubao-transcription';
+
+async function firstVisibleLocator(locators, label) {
+    let lastError;
+    for (const locator of locators) {
+        try {
+            if (await locator.count() === 0) continue;
+            await locator.first().waitFor({ state: 'visible', timeout: 5_000 });
+            return locator.first();
+        } catch (error) {
+            lastError = error;
+        }
+    }
+    throw new Error(`${label}不可用${lastError?.message ? `: ${lastError.message}` : ''}`);
+}
+
+async function clickFirstVisible(page, locators, meta, label) {
+    const locator = await firstVisibleLocator(locators, label);
+    await safeClick(page, locator, { bias: 'button' });
+    return locator;
+}
+
+async function activateWorkTaskTurbo(page, meta) {
+    await clickFirstVisible(page, [
+        page.getByRole('button', { name: /^新工作任务$/i }),
+        page.locator('[role="button"]').filter({ hasText: /^新工作任务$/i })
+    ], meta, '豆包新工作任务入口');
+    await sleep(600, 900);
+
+    await clickFirstVisible(page, [
+        page.locator('#input-engine-container button[aria-haspopup="menu"]')
+            .filter({ hasText: /快速|专家|工作任务\s*(?:Turbo|Pro)/i }),
+        page.loc('button[aria-haspopup="menu"]').filter({ hasText: /快速|专家|工作任务\s*(?:Turbo|Pro)/i })
+    ], meta, '工作任务模式选择器');
+    await clickFirstVisible(page, [
+        page.getByRole('menuitem', { name: /工作任务\s*Turbo/i }),
+        page.locator('[role="menuitem"]').filter({ hasText: /工作任务\s*Turbo/i })
+    ], meta, '工作任务 Turbo');
+    await page.getByRole('button', { name: /工作任务\s*Turbo/i }).first()
+        .waitFor({ state: 'visible', timeout: 5_000 });
+}
+
+async function activateDeepResearch(page, meta) {
+    await clickFirstVisible(page, [
+        page.locator('#input-engine-container button').filter({ hasText: /^深入研究$/ }),
+        page.getByRole('button', { name: /^深入研究$/i })
+    ], meta, '深入研究入口');
+    await page.locator('textarea[placeholder*="输入主题和报告要求"]').first()
+        .waitFor({ state: 'visible', timeout: 5_000 });
+}
+
+async function selectTextMode(page, modelId, meta) {
+    const mode = TEXT_MODELS[modelId] || TEXT_MODELS.seed;
+    if (mode.kind === 'work_task_turbo') {
+        await activateWorkTaskTurbo(page, meta);
+        return;
+    }
+    if (mode.kind === 'deep_research') {
+        await activateDeepResearch(page, meta);
+        return;
+    }
+
+    const modelSelectorBtn = page.locator('#input-engine-container button[aria-haspopup="menu"]')
+        .filter({ hasText: /Fast|Think|Pro|快速|思考|专家|專家/ })
+        .first();
+    let selectorExists = false;
+    try {
+        await modelSelectorBtn.waitFor({ state: 'attached', timeout: 5_000 });
+        selectorExists = true;
+    } catch {
+        selectorExists = false;
+    }
+    if (!selectorExists) return;
+
+    const menuItem = page.getByRole('menuitem', { name: mode.menu });
+    for (let attempt = 1; attempt <= 3; attempt++) {
+        await sleep(500, 1_000);
+        await safeClick(page, modelSelectorBtn, { bias: 'button' });
+        try {
+            await menuItem.waitFor({ state: 'visible', timeout: 3_000 });
+            break;
+        } catch {
+            logger.warn('适配器', `模型菜单未弹出，重试 ${attempt}/3`, meta);
+            if (attempt === 3) throw new Error('模型选择菜单未弹出');
+        }
+    }
+    await safeClick(page, menuItem, { bias: 'button' });
+    await sleep(600, 1_000);
+}
+
 /**
  * 执行文本生成任务
  * @param {object} context - 浏览器上下文 { page, config }
@@ -31,15 +129,7 @@ async function generate(context, prompt, imgPaths, modelId, meta = {}) {
     const { page, config } = context;
     const waitTimeout = config?.backend?.pool?.waitTimeout ?? 120000;
 
-    // 是否使用深度思考模式
-    const useThinking = modelId === 'seed-thinking' || modelId === 'seed-pro';
-
-    // 模型 ID 到菜单项无障碍名称的正则表达式映射（兼容英文、简繁体中文）
-    const MODEL_MENU_MAP = {
-        'seed': /Fast Solves most questions|快速 适用于大部分情况|快速 適用於大部分情況/,
-        'seed-thinking': /Think Solves more complex problems|思考 擅长解决更难的问题|思考 擅長解決更難的問題/,
-        'seed-pro': /Pro Advanced Pro model|专家 研究级智能模型|專家 研究級智慧模型/
-    };
+    const useThinking = ['seed-thinking', 'seed-pro', 'doubao-deep-research'].includes(modelId);
 
     try {
         logger.info('适配器', '开启新会话...', meta);
@@ -49,41 +139,10 @@ async function generate(context, prompt, imgPaths, modelId, meta = {}) {
         const inputLocator = page.locator('textarea.semi-input-textarea');
         await waitForInput(page, inputLocator, { click: false });
 
-        // 2. 选择模型
-        const modelMenuName = MODEL_MENU_MAP[modelId] || MODEL_MENU_MAP['seed'];
-        logger.debug('适配器', `选择模型: ${modelId} -> ${String(modelMenuName)}`, meta);
+        // 2. 选择普通模型，或激活网页的 Turbo / 深入研究模式。
+        logger.debug('适配器', `选择豆包文本模式: ${modelId}`, meta);
         await sleep(300, 500);
-
-        // 给予 1 秒的缓冲时间等待 React 渲染按钮
-        await sleep(1000); // 确保有一定的渲染时间
-        const modelSelectorBtn = page.locator('#input-engine-container button[aria-haspopup="menu"]')
-            .filter({ hasText: /Fast|Think|Pro|快速|思考|专家|專家/ })
-            .first();
-        let selectorExists = false;
-        try {
-            await modelSelectorBtn.waitFor({ state: 'attached', timeout: 5000 });
-            selectorExists = true;
-        } catch (e) {
-            selectorExists = false;
-        }
-
-        if (selectorExists) {
-            const menuItem = page.getByRole('menuitem', { name: modelMenuName });
-            // 点击模型选择按钮，最多重试 3 次（菜单偶尔不弹出）
-            for (let attempt = 1; attempt <= 3; attempt++) {
-                await sleep(500, 1000);
-                await safeClick(page, modelSelectorBtn, { bias: 'button' });
-                try {
-                    await menuItem.waitFor({ state: 'visible', timeout: 3000 });
-                    break; // 菜单弹出，退出重试
-                } catch {
-                    logger.warn('适配器', `模型菜单未弹出，重试 ${attempt}/3`, meta);
-                    if (attempt === 3) throw new Error('模型选择菜单未弹出');
-                }
-            }
-            await safeClick(page, menuItem, { bias: 'button' });
-            await sleep(600, 1000); // 留出充足时间等待模型选择浮窗自动关闭，防止遮挡上传图标
-        }
+        await selectTextMode(page, modelId, meta);
 
         // 3. 上传图片 (如果有)
         if (imgPaths && imgPaths.length > 0) {
@@ -310,13 +369,156 @@ function parseSSEResponse(body, useThinking) {
     return { text: resultText, reasoning: reasoningText };
 }
 
+function parseJsonObject(value) {
+    if (typeof value !== 'string') return null;
+    const trimmed = value.trim();
+    if (!/^[{[]/.test(trimmed)) return null;
+    try {
+        const parsed = JSON.parse(trimmed);
+        return parsed && typeof parsed === 'object' ? parsed : null;
+    } catch {
+        return null;
+    }
+}
+
+function transcriptText(value) {
+    if (typeof value !== 'string') return '';
+    const text = value.trim();
+    return text && !/^(?:event|data|id|retry):/mi.test(text) ? text : '';
+}
+
+function findTranscriptInObject(value, seen = new Set()) {
+    if (!value || typeof value !== 'object' || seen.has(value)) return '';
+    seen.add(value);
+
+    for (const key of ['text', 'transcript', 'transcription', 'content', 'result']) {
+        const candidate = value[key];
+        if (typeof candidate === 'string') {
+            const nested = parseJsonObject(candidate);
+            const text = nested ? findTranscriptInObject(nested, seen) : transcriptText(candidate);
+            if (text) return text;
+        } else {
+            const text = findTranscriptInObject(candidate, seen);
+            if (text) return text;
+        }
+    }
+
+    for (const nested of Object.values(value)) {
+        if (nested && typeof nested === 'object') {
+            const text = findTranscriptInObject(nested, seen);
+            if (text) return text;
+        }
+    }
+    return '';
+}
+
+export function parseDoubaoTranscriptionResponse(body) {
+    if (body && typeof body === 'object') return { text: findTranscriptInObject(body) };
+
+    const source = String(body || '').trim();
+    const directJson = parseJsonObject(source);
+    if (directJson) return { text: findTranscriptInObject(directJson) };
+
+    const isSse = /(^|\n)\s*(?:event|data|id|retry):/m.test(source);
+    if (!isSse) return { text: transcriptText(source) };
+
+    for (const line of source.split(/\r?\n/)) {
+        if (!/^data:\s*/i.test(line)) continue;
+        const candidate = line.replace(/^data:\s*/, '').trim();
+        if (!candidate || candidate === '[DONE]') continue;
+        try {
+            const text = findTranscriptInObject(JSON.parse(candidate));
+            if (text) return { text };
+        } catch {
+            // Continue parsing the remaining SSE events.
+        }
+    }
+
+    const parsed = parseSSEResponse(source, false);
+    if (parsed.text) return { text: parsed.text };
+    return { text: '' };
+}
+
+export async function transcribe(context, payload, modelId, meta = {}) {
+    if (modelId !== TRANSCRIPTION_MODEL_ID) {
+        return { error: `暂不支持的豆包转写模型: ${modelId}` };
+    }
+    if (!payload?.filePath) return { error: '录音转写需要上传音频文件' };
+
+    const { page, config } = context;
+    const waitTimeout = config?.backend?.pool?.waitTimeout ?? 120_000;
+    try {
+        await gotoWithCheck(page, TARGET_URL);
+        await waitForInput(page, page.locator('textarea.semi-input-textarea'), { click: false });
+
+        await clickFirstVisible(page, [
+            page.getByRole('button', { name: /更多|More/i }),
+            page.locator('button').filter({ hasText: /更多/i })
+        ], meta, '豆包更多菜单');
+        await clickFirstVisible(page, [
+            page.getByRole('menuitem', { name: /录音转写/i }),
+            page.getByText(/录音转写/i)
+        ], meta, '录音转写入口');
+        await sleep(500, 900);
+
+        const inputs = page.locator('input[type="file"]');
+        if (await inputs.count() > 0) {
+            await inputs.first().setInputFiles(payload.filePath);
+        } else {
+            const uploadTrigger = await firstVisibleLocator([
+                page.getByRole('button', { name: /上传.*(?:录音|音频|文件)|选择.*(?:录音|音频|文件)/i }),
+                page.locator('[role="button"]').filter({ hasText: /上传.*(?:录音|音频|文件)|选择.*(?:录音|音频|文件)/i })
+            ], '录音文件上传');
+            await uploadFilesViaChooser(page, uploadTrigger, [payload.filePath], {}, meta);
+        }
+
+        let settled = false;
+        const transcriptPromise = new Promise((resolve, reject) => {
+            const timeout = setTimeout(() => {
+                if (!settled) {
+                    settled = true;
+                    page.off('response', onResponse);
+                    reject(new Error(`录音转写超时 (${Math.round(waitTimeout / 1_000)} 秒)`));
+                }
+            }, waitTimeout);
+            const onResponse = async response => {
+                try {
+                    const url = response.url();
+                    if (!/(transcri|audio|chat\/completion)/i.test(url)) return;
+                    const text = parseDoubaoTranscriptionResponse(await response.text()).text;
+                    if (!text || settled) return;
+                    settled = true;
+                    clearTimeout(timeout);
+                    page.off('response', onResponse);
+                    resolve({ text });
+                } catch {
+                    // Non-text provider responses are not a transcription result.
+                }
+            };
+            page.on('response', onResponse);
+        });
+
+        await clickFirstVisible(page, [
+            page.getByRole('button', { name: /开始转写|转写/i }),
+            page.locator('button').filter({ hasText: /开始转写|转写/i })
+        ], meta, '开始转写');
+        return await transcriptPromise;
+    } catch (error) {
+        const pageError = normalizePageError(error, meta);
+        if (pageError) return pageError;
+        logger.error('适配器', '豆包录音转写失败', { ...meta, error: error.message, modelId });
+        const safeMessage = String(error.message || '未知错误').replaceAll(String(payload.filePath), '已上传音频');
+        return { error: `豆包录音转写失败: ${safeMessage}` };
+    }
+}
+
 /**
  * 适配器 manifest
  */
 export const manifest = {
     id: 'doubao_text',
     displayName: '豆包 (文本生成)',
-    description: '使用字节跳动豆包生成文本，支持深度思考模式和图片上传。需要已登录的豆包账户。',
+    description: '使用字节跳动豆包生成文本，支持专家、工作任务 Turbo、深入研究和录音转写。需要已登录的豆包账户。',
 
     getTargetUrl(config, workerConfig) {
         return TARGET_URL;
@@ -325,10 +527,14 @@ export const manifest = {
     models: [
         { id: 'seed', imagePolicy: 'optional', type: 'text' },
         { id: 'seed-thinking', imagePolicy: 'optional', type: 'text' },
-        { id: 'seed-pro', imagePolicy: 'optional', type: 'text' }
+        { id: 'seed-pro', imagePolicy: 'optional', type: 'text', capabilities: ['expert_mode'] },
+        { id: 'doubao-work-task-turbo', imagePolicy: 'optional', type: 'text', capabilities: ['work_task_turbo'] },
+        { id: 'doubao-deep-research', imagePolicy: 'optional', type: 'text', capabilities: ['deep_research'] },
+        { id: 'doubao-transcription', imagePolicy: 'forbidden', type: 'transcription', capabilities: ['audio_transcription'] }
     ],
 
     navigationHandlers: [],
 
-    generate
+    generate,
+    transcribe
 };

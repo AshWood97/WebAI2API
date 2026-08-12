@@ -48,6 +48,7 @@ const {
     initBrowser,
     generate,
     executeMedia,
+    transcribe,
     TEMP_DIR,
     getModels,
     getImagePolicy,
@@ -110,6 +111,13 @@ const mediaManager = new MediaManager({
     getWorkerCookies: async (workerName, domain) => await queueManager.getWorkerCookies(workerName, domain)
 });
 
+async function transcribeWithPool(payload, modelId, meta) {
+    if (!queueManager.getPoolContext()) {
+        await queueManager.initializePool();
+    }
+    return await transcribe(payload, modelId, meta);
+}
+
 function getRuntimeStatus() {
     const queue = queueManager.getStatus();
     const pool = backend.getPoolManager()?.getRuntimeStatus() || {
@@ -158,6 +166,7 @@ const handleRequest = createGlobalRouter({
     imageLimit: IMAGE_LIMIT,
     queueManager,
     mediaManager,
+    transcribe: transcribeWithPool,
     config,
     loginMode: isLoginMode,
     getSafeMode: () => ({ enabled: safeMode, reason: safeModeReason }),

@@ -605,6 +605,48 @@ export class Worker {
     }
 
     /**
+     * Execute a model-specific transcription request on the shared browser
+     * page. This intentionally shares the same page lock as generation so an
+     * upload can never race a prompt or media task.
+     */
+    async transcribe(payload, modelId, meta = {}) {
+        if (!this.supports(modelId)) {
+            return { error: `Worker [${this.name}] 不支持模型: ${modelId}` };
+        }
+        if (!this.initialized || !this.page || this.page.isClosed()) {
+            try {
+                await this._reinit();
+            } catch (error) {
+                return { error: `Worker 重新初始化失败: ${error.message}` };
+            }
+        }
+
+        const type = this._getAdapterType(modelId);
+        const actualModelId = modelId.includes('/') ? modelId.split('/', 2)[1] : modelId;
+        const adapter = registry.getAdapter(type);
+        if (typeof adapter?.transcribe !== 'function') {
+            return { error: `适配器 ${type} 未实现录音转写` };
+        }
+
+        this.busyCount++;
+        try {
+            return await this._withPageLock(async () => {
+                const result = await adapter.transcribe({
+                    page: this.page,
+                    config: this.globalConfig,
+                    proxyConfig: this.proxyConfig,
+                    userDataDir: this.userDataDir,
+                    workerName: this.name,
+                    instanceName: this.instanceName
+                }, payload, actualModelId, { ...meta, adapter: type, model: actualModelId });
+                return { ...(result || {}), workerName: this.name, adapter: type };
+            });
+        } finally {
+            this.busyCount--;
+        }
+    }
+
+    /**
      * 重新初始化浏览器（崩溃恢复）
      * @private
      */

@@ -47,7 +47,7 @@
 | [**DeepSeek**](https://chat.deepseek.com/) | ✅ | 🚫 | 🚫 | 
 | [**Sora**](https://sora.chatgpt.com/) | 🚫 | 🚫 | ✅💧 | 
 | [**Google Flow**](https://labs.google/fx/zh/tools/flow) | 🚫 | ✅ | ❌ | 
-| [**豆包**](https://www.doubao.com/) | ✅ | ✅ | ❌ | 
+| [**豆包**](https://www.doubao.com/) | ✅ | ✅ | ✅ |
 | 待续... | - | - | - | 
 
 > [!NOTE]
@@ -233,6 +233,29 @@ curl http://localhost:3000/v1/chat/completions \
 - **数量**: 最大 10 张(具体限制因网站而异)
 - **数据格式**: 必须使用 Base64 Data URL 格式
 - **自动转换**: 服务器会自动将所有图片转换为 JPG 格式以保证兼容性
+
+#### 豆包网页能力
+
+以下模型会在 `GET /v1/models` 中出现，并共享已登录的豆包浏览器 Worker：
+
+| 网页能力 | 模型 | 调用端点 |
+| :--- | :--- | :--- |
+| 专家模式 | `seed-pro` | `POST /v1/chat/completions` |
+| 工作任务 Turbo | `doubao-work-task-turbo` | `POST /v1/chat/completions` |
+| 深入研究 | `doubao-deep-research` | `POST /v1/chat/completions` |
+| 录音转写 | `doubao-transcription` | `POST /v1/audio/transcriptions` |
+
+录音转写使用 multipart 请求，支持 `json`、`text` 与 `verbose_json` 响应格式：
+
+```bash
+curl http://localhost:3000/v1/audio/transcriptions \
+  -H "Authorization: Bearer YOUR_API_KEY" \
+  -F "model=doubao-transcription" \
+  -F "file=@recording.mp3" \
+  -F "response_format=json"
+```
+
+视频使用 `POST /v1/videos`，音乐使用 `POST /v1/audio/generations`；二者的可用模型同样以 `/v1/models` 为准。
 
 #### 参数说明
 

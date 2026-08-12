@@ -111,6 +111,12 @@ export async function parseRequest(data, options) {
                     `模型 ${data.model} 是音频模型，请改用 POST /v1/audio/generations`
                 );
             }
+            if (modelType === 'transcription') {
+                return parseError(
+                    ERROR_CODES.INVALID_MODEL,
+                    `模型 ${data.model} 是录音转写模型，请改用 POST /v1/audio/transcriptions`
+                );
+            }
 
             if (isTextMode) {
                 logger.info('服务器', '解析模式: 文本对话 (虚拟上下文构建)', { id: requestId });

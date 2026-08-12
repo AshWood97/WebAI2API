@@ -24,10 +24,11 @@ export function createOpenAIRouter(context) {
         tempDir,
         imageLimit,
         queueManager,
-        mediaManager
+        mediaManager,
+        transcribe
     } = context;
 
-    const handleMediaRequest = mediaManager ? createMediaRouter({ getModels, mediaManager }) : null;
+    const handleMediaRequest = mediaManager ? createMediaRouter({ getModels, mediaManager, transcribe }) : null;
 
     /**
      * 处理 GET /v1/models

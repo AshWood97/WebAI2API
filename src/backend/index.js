@@ -84,6 +84,13 @@ export function getBackend() {
             return await poolManager.executeMedia(kind, payload, modelId, meta);
         },
 
+        transcribe: async (payload, modelId, meta = {}) => {
+            if (!poolManager) {
+                return { error: 'Pool 未初始化' };
+            }
+            return await poolManager.transcribe(payload, modelId, meta);
+        },
+
         /**
          * 获取模型列表
          * @returns {object}

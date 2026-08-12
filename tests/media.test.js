@@ -11,6 +11,8 @@ import { MediaManager } from '../src/media/index.js';
 import { Worker } from '../src/backend/pool/Worker.js';
 import { createMediaRouter } from '../src/server/api/openai/mediaRoutes.js';
 import { parseMusicResult } from '../src/backend/adapter/doubao_audio.js';
+import { manifest as doubaoTextManifest, parseDoubaoTranscriptionResponse } from '../src/backend/adapter/doubao_text.js';
+import { parseRequest } from '../src/server/api/openai/parse.js';
 
 async function tempDataDir(t) {
     const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'webai-media-test-'));
@@ -166,4 +168,133 @@ test('Doubao music parser extracts a base64-encoded audio URL from SSE', () => {
     assert.equal(parsed.tracks.length, 1);
     assert.equal(parsed.tracks[0].audio_url, url);
     assert.equal(parsed.tracks[0].duration, 12);
+});
+
+test('Doubao transcription parser extracts JSON and SSE text without returning raw SSE', () => {
+    assert.deepEqual(parseDoubaoTranscriptionResponse({ transcript: 'hello from JSON' }), { text: 'hello from JSON' });
+    assert.deepEqual(
+        parseDoubaoTranscriptionResponse('event: message\ndata: {"result":{"transcript":"hello from SSE"}}\n\ndata: [DONE]\n'),
+        { text: 'hello from SSE' }
+    );
+    assert.deepEqual(
+        parseDoubaoTranscriptionResponse('event: message\ndata: {"progress":42}\n\ndata: [DONE]\n'),
+        { text: '' }
+    );
+});
+
+test('Doubao text manifest exposes the verified webpage capabilities', () => {
+    const models = new Map(doubaoTextManifest.models.map(model => [model.id, model]));
+    assert.deepEqual(models.get('seed-pro').capabilities, ['expert_mode']);
+    assert.deepEqual(models.get('doubao-work-task-turbo').capabilities, ['work_task_turbo']);
+    assert.deepEqual(models.get('doubao-deep-research').capabilities, ['deep_research']);
+    assert.deepEqual(models.get('doubao-transcription').capabilities, ['audio_transcription']);
+    assert.equal(models.get('doubao-transcription').type, 'transcription');
+});
+
+test('chat completions reject transcription models with the dedicated endpoint', async () => {
+    const parsed = await parseRequest({
+        model: 'doubao-transcription',
+        messages: [{ role: 'user', content: 'this must not become a chat request' }]
+    }, {
+        tempDir: os.tmpdir(),
+        imageLimit: 1,
+        backendName: 'pool',
+        getSupportedModels: () => ({ object: 'list', data: [{ id: 'doubao-transcription' }] }),
+        getImagePolicy: () => 'forbidden',
+        getModelType: () => 'transcription',
+        requestId: 'test',
+        logger
+    });
+    assert.equal(parsed.success, false);
+    assert.match(parsed.error.error, /POST \/v1\/audio\/transcriptions/);
+});
+
+async function startRoute(t, context) {
+    const route = createMediaRouter(context);
+    const server = http.createServer(async (req, res) => {
+        const handled = await route(req, res, new URL(req.url, 'http://localhost').pathname);
+        if (handled === false) res.writeHead(404).end();
+    });
+    await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+    t.after(() => server.close());
+    return `http://127.0.0.1:${server.address().port}`;
+}
+
+function transcriptionForm({ model = 'doubao-transcription', responseFormat = 'json' } = {}) {
+    const form = new FormData();
+    form.set('model', model);
+    form.set('response_format', responseFormat);
+    form.set('file', new Blob(['not a real recording'], { type: 'audio/mpeg' }), 'recording.mp3');
+    return form;
+}
+
+test('audio transcriptions accept multipart input and return each supported response format', async t => {
+    const calls = [];
+    const baseUrl = await startRoute(t, {
+        getModels: () => ({ object: 'list', data: [{ id: 'doubao-transcription', type: 'transcription' }] }),
+        mediaManager: {
+            maxUploadBytes: 1024 * 1024,
+            saveUpload: async upload => ({ ...upload, absolute_path: '/private/uploads/recording.mp3' })
+        },
+        transcribe: async (payload, model, meta) => {
+            calls.push({ payload, model, meta });
+            return { text: 'converted speech', language: 'zh', duration: 1.25 };
+        }
+    });
+
+    const jsonResponse = await fetch(`${baseUrl}/audio/transcriptions`, {
+        method: 'POST', body: transcriptionForm()
+    });
+    assert.equal(jsonResponse.status, 200);
+    assert.deepEqual(await jsonResponse.json(), { text: 'converted speech' });
+
+    const textResponse = await fetch(`${baseUrl}/audio/transcriptions`, {
+        method: 'POST', body: transcriptionForm({ responseFormat: 'text' })
+    });
+    assert.equal(textResponse.status, 200);
+    assert.equal(await textResponse.text(), 'converted speech');
+
+    const verboseResponse = await fetch(`${baseUrl}/audio/transcriptions`, {
+        method: 'POST', body: transcriptionForm({ responseFormat: 'verbose_json' })
+    });
+    assert.equal(verboseResponse.status, 200);
+    assert.deepEqual(await verboseResponse.json(), {
+        task: 'transcribe', language: 'zh', duration: 1.25, text: 'converted speech'
+    });
+    assert.equal(calls.length, 3);
+    assert.equal(calls[0].model, 'doubao-transcription');
+    assert.equal(calls[0].payload.filePath, '/private/uploads/recording.mp3');
+    assert.equal(calls[0].payload.file.purpose, 'transcription');
+});
+
+test('audio transcriptions reject a non-transcription model and redact provider details', async t => {
+    let transcribeCalls = 0;
+    const baseUrl = await startRoute(t, {
+        getModels: () => ({ object: 'list', data: [
+            { id: 'seed', type: 'text' },
+            { id: 'doubao-transcription', type: 'transcription' }
+        ] }),
+        mediaManager: {
+            maxUploadBytes: 1024 * 1024,
+            saveUpload: async upload => ({ ...upload, absolute_path: '/private/uploads/recording.mp3' })
+        },
+        transcribe: async () => {
+            transcribeCalls++;
+            return { error: 'provider failed at /private/uploads/recording.mp3 token=supersecret' };
+        }
+    });
+
+    const invalidModel = await fetch(`${baseUrl}/audio/transcriptions`, {
+        method: 'POST', body: transcriptionForm({ model: 'seed' })
+    });
+    assert.equal(invalidModel.status, 400);
+    assert.match((await invalidModel.json()).error.message, /不能用于 transcription/);
+    assert.equal(transcribeCalls, 0);
+
+    const providerFailure = await fetch(`${baseUrl}/audio/transcriptions`, {
+        method: 'POST', body: transcriptionForm()
+    });
+    assert.equal(providerFailure.status, 502);
+    const response = await providerFailure.json();
+    assert.doesNotMatch(response.error.message, /private\/uploads|supersecret/);
 });

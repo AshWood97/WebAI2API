@@ -139,11 +139,31 @@ function parseMultipart(buffer, contentType) {
     return parts;
 }
 
+function transcriptionFile(parts) {
+    const file = parts.find(part => part.name === 'file' && part.filename !== undefined);
+    if (!file?.filename) throw new Error('multipart 请求必须包含音频 file 字段');
+    return file;
+}
+
+function clientError(message) {
+    const error = new Error(message);
+    error.status = 400;
+    return error;
+}
+
+function redactTranscriptionError(message, uploadedPath) {
+    let redacted = String(message || '未知错误');
+    if (uploadedPath) redacted = redacted.replaceAll(String(uploadedPath), '已上传音频');
+    return redacted
+        .replace(/(?:[A-Za-z]:\\|\/)(?:[^\s"'<>\\/]+[\\/])*[^\s"'<>]+/g, '[private path]')
+        .replace(/\b(api[_-]?key|token|authorization)\s*[=:]\s*[^\s,;]+/gi, (_match, name) => `${name}=[redacted]`);
+}
+
 /**
  * @param {object} context
  */
 export function createMediaRouter(context) {
-    const { getModels, mediaManager } = context;
+    const { getModels, mediaManager, transcribe } = context;
 
     async function create(kind, req, res) {
         try {
@@ -198,8 +218,61 @@ export function createMediaRouter(context) {
         }
     }
 
+    async function createTranscription(req, res) {
+        try {
+            if (typeof transcribe !== 'function') throw new Error('当前服务未配置录音转写能力');
+            let audio;
+            let modelInfo;
+            let responseFormat;
+            try {
+                const body = await readBody(req, mediaManager.maxUploadBytes + 1024 * 1024);
+                const parts = parseMultipart(body, req.headers['content-type']);
+                audio = transcriptionFile(parts);
+                const model = parts.find(part => part.name === 'model')?.body?.toString('utf8')?.trim() || 'doubao-transcription';
+                modelInfo = getModel(getModels, model, 'transcription');
+                responseFormat = parts.find(part => part.name === 'response_format')?.body?.toString('utf8')?.trim() || 'json';
+                if (!['json', 'text', 'verbose_json'].includes(responseFormat)) {
+                    throw clientError('response_format 仅支持 json、text 或 verbose_json');
+                }
+            } catch (error) {
+                error.status ||= 400;
+                throw error;
+            }
+            const file = await mediaManager.saveUpload({
+                filename: audio.filename,
+                mimeType: audio.mimeType || 'application/octet-stream',
+                buffer: audio.body,
+                purpose: 'transcription'
+            });
+            const result = await transcribe({
+                filePath: file.absolute_path,
+                file,
+                responseFormat
+            }, modelInfo.id, { requestId: crypto.randomUUID().slice(0, 8) });
+            if (result?.error) throw new Error(redactTranscriptionError(result.error, file.absolute_path));
+            const text = String(result?.text || '').trim();
+            if (!text) throw new Error('豆包未返回转写文本');
+            if (responseFormat === 'text') {
+                res.writeHead(200, { 'Content-Type': 'text/plain; charset=utf-8' });
+                res.end(text);
+                return;
+            }
+            sendJson(res, 200, responseFormat === 'verbose_json'
+                ? { task: 'transcribe', language: result.language || null, duration: result.duration || null, text }
+                : { text });
+        } catch (error) {
+            const status = error.status || 502;
+            sendApiError(res, {
+                code: status === 400 ? ERROR_CODES.INVALID_MODEL : ERROR_CODES.GENERATION_FAILED,
+                message: error.message,
+                status
+            });
+        }
+    }
+
     return async function handleMediaRequest(req, res, pathname) {
         if (req.method === 'POST' && pathname === '/files') return uploadFile(req, res);
+        if (req.method === 'POST' && pathname === '/audio/transcriptions') return createTranscription(req, res);
         if (req.method === 'POST' && (pathname === '/videos' || pathname === '/video/generations' || pathname === '/videos/generations')) {
             return create('video', req, res);
         }

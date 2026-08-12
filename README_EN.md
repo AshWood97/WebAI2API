@@ -50,7 +50,7 @@
 | [**DeepSeek**](https://chat.deepseek.com/) | ✅ | 🚫 | 🚫 | 
 | [**Sora**](https://sora.chatgpt.com/) | 🚫 | 🚫 | ✅💧 | 
 | [**Google Flow**](https://labs.google/fx/zh/tools/flow) | 🚫 | ✅ | ❌ | 
-| [**Doubao**](https://www.doubao.com/) | ✅ | ✅ | ❌ | 
+| [**Doubao**](https://www.doubao.com/) | ✅ | ✅ | ✅ |
 | To be continued... | - | - | - | 
 
 > [!NOTE]
@@ -236,6 +236,29 @@ curl http://localhost:3000/v1/chat/completions \
 - **Quantity**: Max 10 images (specific limits vary by website)
 - **Data Format**: Must use Base64 Data URL format
 - **Auto Conversion**: The server automatically converts all images to JPG to ensure compatibility.
+
+#### Doubao web capabilities
+
+The following models appear in `GET /v1/models` and share the authenticated Doubao browser worker:
+
+| Web capability | Model | Endpoint |
+| :--- | :--- | :--- |
+| Expert mode | `seed-pro` | `POST /v1/chat/completions` |
+| Work Task Turbo | `doubao-work-task-turbo` | `POST /v1/chat/completions` |
+| Deep Research | `doubao-deep-research` | `POST /v1/chat/completions` |
+| Audio transcription | `doubao-transcription` | `POST /v1/audio/transcriptions` |
+
+Audio transcription accepts multipart input and supports `json`, `text`, and `verbose_json` response formats:
+
+```bash
+curl http://localhost:3000/v1/audio/transcriptions \
+  -H "Authorization: Bearer YOUR_API_KEY" \
+  -F "model=doubao-transcription" \
+  -F "file=@recording.mp3" \
+  -F "response_format=json"
+```
+
+Use `POST /v1/videos` for video and `POST /v1/audio/generations` for music. Refer to `/v1/models` for the active model list.
 
 #### Parameter Description
 

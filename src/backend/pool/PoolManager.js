@@ -261,6 +261,20 @@ export class PoolManager {
         }
     }
 
+    async transcribe(payload, modelId, meta = {}) {
+        const candidates = this.workers.filter(worker => worker.supports(modelId));
+        if (candidates.length === 0) {
+            return { error: `没有 Worker 支持模型: ${modelId}` };
+        }
+        const worker = this.strategySelector.sort(candidates)[0];
+        try {
+            return await worker.transcribe(payload, modelId, meta);
+        } catch (error) {
+            logger.error('工作池', `[${worker.name}] 录音转写异常`, { error: error.message, ...meta });
+            return normalizeError(error.message || '录音转写执行异常');
+        }
+    }
+
     /**
      * 获取所有模型列表
      */
