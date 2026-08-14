@@ -1,0 +1,31 @@
+html,
+body,
+#app {
+  background: #0b0e14;
+  color: #e6e6ef;
+  color-scheme: dark;
+}
+
+body {
+  margin: 0;
+}
+
+.ant-layout,
+.ant-layout-content,
+.ant-layout-footer {
+  background: #0b0e14 !important;
+}
+
+.ant-layout-sider {
+  background: #10141e !important;
+}
+
+.ant-layout-header.header {
+  color: #e6e6ef;
+}
+
+.ant-card {
+  background: #161b22;
+  border-color: rgba(255, 255, 255, 0.08);
+  color: #e6e6ef;
+}

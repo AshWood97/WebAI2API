@@ -1,6 +1,14 @@
 <script setup>
-import { ref, computed, onMounted, onUnmounted, watch } from 'vue';
+import { ref, computed, onMounted, onUnmounted, watch, nextTick } from 'vue';
+import { useRouter } from 'vue-router';
 import { useSettingsStore } from '@/stores/settings';
+import {
+    buildRequestAccountOptions,
+    buildRequestProviderOptions,
+    countRequestProviderAccounts,
+    nativeProviderFor,
+    providerVisual,
+} from '@/lib/request-provider-options';
 import {
     ReloadOutlined,
     DeleteOutlined,
@@ -19,11 +27,14 @@ import {
     CopyOutlined,
     AppstoreOutlined,
     UserOutlined,
-    AudioOutlined
+    AudioOutlined,
+    UpOutlined,
+    DownOutlined
 } from '@ant-design/icons-vue';
 import { message, Modal } from 'ant-design-vue';
 
 const settingsStore = useSettingsStore();
+const router = useRouter();
 
 // 数据状态
 const loading = ref(false);
@@ -63,6 +74,8 @@ const mediaCache = ref({});
 
 // 发送请求相关
 const sendModelList = ref([]);
+const nativeProviders = ref([]);
+const nativeProviderAccounts = ref({});
 const sendProvider = ref('doubao');
 const sendAccount = ref('');
 const sendModel = ref('');
@@ -74,18 +87,11 @@ const sendReasoningMode = ref(true);
 const sending = ref(false);
 
 const modelProviderId = (model) => model?.provider || model?.owned_by || 'other';
-const modelProviderName = (model) => model?.provider_name || modelProviderId(model);
 const modelAccountId = (model) => model?.account_id || model?.owned_by || 'default';
-const modelAccountName = (model) => model?.account_name || modelAccountId(model);
 const isScopedModel = (model) => Boolean(model?.adapter && model.id?.startsWith(`${model.adapter}/`));
 
 const sendProviderOptions = computed(() => {
-    const providers = new Map();
-    for (const model of sendModelList.value.filter(isScopedModel)) {
-        const id = modelProviderId(model);
-        if (!providers.has(id)) providers.set(id, { id, name: modelProviderName(model) });
-    }
-    return [...providers.values()].sort((a, b) => (a.id === 'doubao' ? -1 : b.id === 'doubao' ? 1 : a.name.localeCompare(b.name)));
+    return buildRequestProviderOptions(sendModelList.value, nativeProviders.value);
 });
 
 const providerModels = computed(() => sendModelList.value.filter(model => (
@@ -93,15 +99,57 @@ const providerModels = computed(() => sendModelList.value.filter(model => (
 )));
 
 const sendAccountOptions = computed(() => {
-    const accounts = new Map();
-    for (const model of providerModels.value) {
-        const id = modelAccountId(model);
-        if (!accounts.has(id)) accounts.set(id, { id, name: modelAccountName(model) });
-    }
-    return [...accounts.values()];
+    return buildRequestAccountOptions(
+        providerModels.value,
+        sendProvider.value,
+        nativeProviderAccounts.value[sendProvider.value] || []
+    );
 });
 
 const accountModels = computed(() => providerModels.value.filter(model => modelAccountId(model) === sendAccount.value));
+const selectedNativeProvider = computed(() => nativeProviderFor(nativeProviders.value, sendProvider.value));
+const selectedProviderName = computed(() => selectedNativeProvider.value?.name
+    || sendProviderOptions.value.find(provider => provider.id === sendProvider.value)?.name
+    || sendProvider.value);
+const selectedNativeProviderNeedsAccount = computed(() => Boolean(selectedNativeProvider.value) && sendAccountOptions.value.length === 0);
+const selectedNativeProviderPending = computed(() => selectedNativeProvider.value?.protocol_ready === false);
+const platformExpanded = ref(false);
+const platformGrid = ref(null);
+const hiddenPlatformCount = ref(0);
+const failedPlatformIcons = ref(new Set());
+const failPlatformIcon = (id) => {
+    const next = new Set(failedPlatformIcons.value);
+    next.add(id);
+    failedPlatformIcons.value = next;
+};
+const platformTiles = computed(() => sendProviderOptions.value.map(provider => {
+    const visual = providerVisual(provider.id, provider.name);
+    const native = nativeProviderFor(nativeProviders.value, provider.id);
+    return {
+        id: provider.id,
+        name: provider.name,
+        mark: visual.mark,
+        color: visual.color,
+        short: visual.short,
+        icon: failedPlatformIcons.value.has(provider.id) ? '' : visual.icon,
+        count: countRequestProviderAccounts(sendModelList.value, provider.id, nativeProviderAccounts.value[provider.id] || []),
+        pending: native?.protocol_ready === false
+    };
+}));
+const measureHiddenPlatforms = () => {
+    const grid = platformGrid.value;
+    if (!grid) {
+        hiddenPlatformCount.value = 0;
+        return;
+    }
+    const tiles = [...grid.querySelectorAll('.platform-tile')];
+    if (!tiles.length) {
+        hiddenPlatformCount.value = 0;
+        return;
+    }
+    const firstTop = tiles[0].offsetTop;
+    hiddenPlatformCount.value = tiles.filter(tile => tile.offsetTop > firstTop + 2).length;
+};
 const selectedSendModel = computed(() => sendModelList.value.find(model => model.id === sendModel.value) || null);
 const selectedModelType = computed(() => selectedSendModel.value?.type || 'text');
 const selectedModelParameters = computed(() => selectedSendModel.value?.web_parameters || []);
@@ -131,7 +179,30 @@ const initializeRequestPath = () => {
     selectFirstAvailableModel();
 };
 
-watch(sendProvider, () => {
+async function fetchNativeProviderAccounts(providerId) {
+    if (!nativeProviderFor(nativeProviders.value, providerId)) return;
+    try {
+        const response = await fetch(`/admin/providers/${encodeURIComponent(providerId)}/accounts`, {
+            headers: settingsStore.getHeaders()
+        });
+        if (!response.ok) return;
+        const payload = await response.json();
+        nativeProviderAccounts.value = {
+            ...nativeProviderAccounts.value,
+            [providerId]: Array.isArray(payload.data) ? payload.data : []
+        };
+    } catch (error) {
+        console.warn(`无法读取 ${providerId} 账号列表`, error);
+    }
+}
+
+watch([platformTiles, platformExpanded], async () => {
+    await nextTick();
+    measureHiddenPlatforms();
+});
+
+watch(sendProvider, async providerId => {
+    await fetchNativeProviderAccounts(providerId);
     const accounts = sendAccountOptions.value;
     if (!accounts.some(account => account.id === sendAccount.value)) {
         sendAccount.value = accounts[0]?.id || '';
@@ -637,15 +708,28 @@ const clearSelection = () => {
 // 获取可用模型列表
 const fetchSendModelList = async () => {
     try {
-        const res = await fetch('/v1/models', { headers: settingsStore.getHeaders() });
-        if (res.ok) {
-            const data = await res.json();
+        const [modelResponse, providerResponse] = await Promise.all([
+            fetch('/v1/models', { headers: settingsStore.getHeaders() }),
+            fetch('/admin/providers', { headers: settingsStore.getHeaders() })
+        ]);
+        if (modelResponse.ok) {
+            const data = await modelResponse.json();
             sendModelList.value = data.data || [];
-            initializeRequestPath();
         }
+        if (providerResponse.ok) {
+            const data = await providerResponse.json();
+            nativeProviders.value = Array.isArray(data.data) ? data.data : [];
+        }
+        initializeRequestPath();
+        await Promise.all(nativeProviders.value.map(provider => fetchNativeProviderAccounts(provider.id)));
     } catch (e) {
         console.error('获取模型列表失败', e);
     }
+};
+
+const openSelectedProviderSettings = () => {
+    if (!selectedNativeProvider.value) return;
+    router.push({ path: '/settings/providers', query: { provider: selectedNativeProvider.value.id } });
 };
 
 // 图片转 base64
@@ -770,6 +854,10 @@ const sendMediaRequest = async () => {
 
 // 发送请求
 const sendRequest = async () => {
+    if (selectedNativeProviderNeedsAccount.value) {
+        message.warning(`请先配置 ${selectedProviderName.value} 账号`);
+        return;
+    }
     if (!sendModel.value) {
         message.warning('请选择模型');
         return;
@@ -891,29 +979,75 @@ const stopAutoRefresh = () => {
     }
 };
 
+let platformResizeObserver = null;
 onMounted(() => {
-    resizeHandler = () => { isMobile.value = window.innerWidth <= 768; };
+    resizeHandler = () => {
+        isMobile.value = window.innerWidth <= 768;
+        measureHiddenPlatforms();
+    };
     window.addEventListener('resize', resizeHandler);
+    if (typeof ResizeObserver === 'function') {
+        platformResizeObserver = new ResizeObserver(() => measureHiddenPlatforms());
+    }
     fetchHistory();
     fetchStats();
     fetchModels();
     fetchSendModelList();
+    nextTick().then(() => {
+        if (platformResizeObserver && platformGrid.value) {
+            platformResizeObserver.observe(platformGrid.value);
+        }
+        measureHiddenPlatforms();
+    });
 });
 
 onUnmounted(() => {
     stopAutoRefresh();
     if (resizeHandler) window.removeEventListener('resize', resizeHandler);
+    platformResizeObserver?.disconnect();
 });
 </script>
 
 <template>
     <!-- 发送请求 -->
-    <a-card title="发送请求" :bordered="false" style="margin-bottom: 24px">
-        <div class="request-path" aria-label="模型请求路径">
-            <div class="request-path-step">
-                <div class="request-path-label"><AppstoreOutlined /> 平台</div>
-                <a-select v-model:value="sendProvider" size="small" :options="sendProviderOptions.map(provider => ({ value: provider.id, label: provider.name }))" />
+    <a-card class="request-card" :bordered="false" style="margin-bottom: 24px">
+        <template #title>发送请求</template>
+        <div class="platform-rail" aria-label="平台">
+            <div class="platform-rail-head">
+                <span class="request-platform-label"><AppstoreOutlined /> 平台</span>
+                <button
+                    v-if="platformExpanded || hiddenPlatformCount > 0"
+                    type="button"
+                    class="platform-rail-toggle"
+                    @click="platformExpanded = !platformExpanded"
+                >
+                    <template v-if="platformExpanded"><UpOutlined /> 收起</template>
+                    <template v-else><DownOutlined /> 展开 {{ hiddenPlatformCount }}</template>
+                </button>
             </div>
+            <div ref="platformGrid" class="platform-rail-grid" :class="{ expanded: platformExpanded }">
+                <button
+                    v-for="tile in platformTiles"
+                    :key="tile.id"
+                    type="button"
+                    class="platform-tile"
+                    :class="{ active: tile.id === sendProvider, pending: tile.pending }"
+                    :title="tile.name"
+                    @click="sendProvider = tile.id"
+                >
+                    <span class="platform-tile-icon" :class="{ 'has-logo': tile.icon }" :style="tile.icon ? undefined : { background: tile.color }">
+                        <img v-if="tile.icon" class="platform-tile-logo" :src="tile.icon" :alt="tile.short" @error="failPlatformIcon(tile.id)" />
+                        <template v-else>{{ tile.mark }}</template>
+                    </span>
+                    <span class="platform-tile-meta">
+                        <span class="platform-tile-name">{{ tile.short }}</span>
+                        <strong class="platform-tile-count">{{ tile.count }}</strong>
+                    </span>
+                    <span v-if="tile.pending" class="platform-tile-pip" />
+                </button>
+            </div>
+        </div>
+        <div class="request-path" aria-label="模型请求路径">
             <div class="request-path-step">
                 <div class="request-path-label"><UserOutlined /> 账户别名</div>
                 <a-select v-model:value="sendAccount" size="small" :options="sendAccountOptions.map(account => ({ value: account.id, label: account.name }))" />
@@ -927,6 +1061,20 @@ onUnmounted(() => {
                 </a-select>
             </div>
         </div>
+
+        <a-alert
+            v-if="selectedNativeProviderPending || selectedNativeProviderNeedsAccount"
+            :type="selectedNativeProviderPending ? 'info' : 'warning'"
+            show-icon
+            style="margin-top: 12px"
+            :message="selectedNativeProviderPending
+                ? `${selectedProviderName} 已吸收，网页协议尚未接通。可先登记账号，登录材料后续再配置。`
+                : `${selectedProviderName} 已吸收，但尚未配置可调用账号`"
+        >
+            <template #action>
+                <a-button size="small" type="primary" @click="openSelectedProviderSettings">配置账号</a-button>
+            </template>
+        </a-alert>
 
         <section v-if="selectedSendModel" class="selected-model-summary" aria-label="模型参数">
             <div class="selected-model-heading">
@@ -957,15 +1105,15 @@ onUnmounted(() => {
             <div class="request-prompt-column">
                 <!-- 提示词 -->
                 <div v-if="!currentModelIsTranscription" style="margin-bottom: 12px;">
-                    <div style="font-size: 12px; color: #8c8c8c; margin-bottom: 4px;">提示词</div>
+                    <div style="font-size: 12px; color: #a1a1aa; margin-bottom: 4px;">提示词</div>
                     <a-textarea v-model:value="sendPrompt" placeholder="输入提示词" :rows="3" size="small" />
                 </div>
 
                 <div v-else class="audio-upload-wrap">
-                    <div style="font-size: 12px; color: #8c8c8c; margin-bottom: 4px;">录音文件</div>
+                    <div style="font-size: 12px; color: #a1a1aa; margin-bottom: 4px;">录音文件</div>
                     <a-upload-dragger :file-list="[]" :before-upload="beforeAudioUpload" @change="handleSendAudioChange" accept="audio/*" :show-upload-list="false">
-                        <p style="margin: 0;"><AudioOutlined style="font-size: 20px; color: #1890ff;" /></p>
-                        <p style="font-size: 12px; margin: 2px 0 0; color: #8c8c8c;">点击或拖拽上传音频</p>
+                        <p style="margin: 0;"><AudioOutlined style="font-size: 20px; color: #e54d5e;" /></p>
+                        <p style="font-size: 12px; margin: 2px 0 0; color: #a1a1aa;">点击或拖拽上传音频</p>
                     </a-upload-dragger>
                     <a-tag v-if="sendAudioFile" closable style="margin-top: 8px;" @close="sendAudioFile = null">
                         <AudioOutlined /> {{ sendAudioFile.name }}
@@ -976,7 +1124,7 @@ onUnmounted(() => {
                 <div style="display: flex; align-items: center; gap: 16px; flex-wrap: wrap;">
                     <a-checkbox v-if="currentModelUsesTextOptions" v-model:checked="sendStreamMode">流式响应</a-checkbox>
                     <a-checkbox v-if="currentModelUsesTextOptions" v-model:checked="sendReasoningMode">返回思考</a-checkbox>
-                    <a-button type="primary" @click="sendRequest" :loading="sending" :disabled="!sendModel">
+                    <a-button type="primary" @click="sendRequest" :loading="sending" :disabled="!sendModel || selectedNativeProviderNeedsAccount">
                         <template #icon><RocketOutlined /></template>
                         发送
                     </a-button>
@@ -985,15 +1133,15 @@ onUnmounted(() => {
 
             <!-- 右侧：图片上传（仅支持图片的模型显示） -->
             <div v-if="currentModelSupportsImage" class="send-upload-area">
-                <div style="font-size: 12px; color: #8c8c8c; margin-bottom: 4px;">
+                <div style="font-size: 12px; color: #a1a1aa; margin-bottom: 4px;">
                     {{ selectedModelType === 'video' ? '参考图' : '附加图片' }} ({{ sendImageList.length }}/10)
                 </div>
                 <a-upload-dragger :file-list="[]" :multiple="true" :before-upload="beforeUpload"
                     @change="handleSendImageChange" accept=".png,.jpg,.jpeg,.gif,.webp" :show-upload-list="false">
                     <p style="margin: 0;">
-                        <InboxOutlined style="font-size: 20px; color: #1890ff;" />
+                        <InboxOutlined style="font-size: 20px; color: #e54d5e;" />
                     </p>
-                    <p style="font-size: 12px; margin: 2px 0 0 0; color: #8c8c8c;">
+                    <p style="font-size: 12px; margin: 2px 0 0 0; color: #a1a1aa;">
                         点击或拖拽上传图片
                     </p>
                 </a-upload-dragger>
@@ -1321,12 +1469,158 @@ onUnmounted(() => {
 </template>
 
 <style scoped>
+
+.request-card :deep(.ant-card-head) {
+    min-height: 56px;
+}
+
+.request-card :deep(.ant-card-head-wrapper) {
+    gap: 12px;
+    flex-wrap: wrap;
+}
+
+.request-card :deep(.ant-card-extra) {
+    margin-inline-start: 0;
+    padding: 0;
+}
+.platform-rail {
+    margin: -4px 0 14px;
+}
+
+.platform-rail-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    margin-bottom: 8px;
+}
+
+.request-platform-label {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    color: #a1a1aa;
+    font-size: 13px;
+    white-space: nowrap;
+}
+
+.platform-rail-toggle {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    border: 0;
+    padding: 0;
+    background: transparent;
+    color: #e54d5e;
+    font-size: 12px;
+    cursor: pointer;
+}
+
+.platform-rail-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(132px, 1fr));
+    column-gap: 8px;
+    row-gap: 8px;
+}
+
+.platform-rail-grid:not(.expanded) {
+    grid-template-rows: minmax(52px, auto);
+    grid-auto-rows: 0;
+    row-gap: 0;
+    overflow: hidden;
+}
+
+.platform-tile {
+    position: relative;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-width: 0;
+    min-height: 52px;
+    padding: 8px 10px;
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 8px;
+    background: #121a2b;
+    text-align: left;
+    cursor: pointer;
+}
+
+.platform-tile:hover {
+    border-color: rgba(229, 77, 94, 0.45);
+    background: #1a2234;
+}
+
+.platform-tile.active {
+    border-color: #e54d5e;
+    background: rgba(229, 77, 94, 0.14);
+    box-shadow: inset 0 0 0 1px #e54d5e;
+}
+
+.platform-tile-icon {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 28px;
+    height: 28px;
+    border-radius: 7px;
+    color: #fff;
+    font-size: 13px;
+    font-weight: 700;
+    flex-shrink: 0;
+    overflow: hidden;
+}
+
+.platform-tile-icon.has-logo {
+    background: #161b22;
+    border: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.platform-tile-logo {
+    width: 100%;
+    height: 100%;
+    object-fit: contain;
+    display: block;
+}
+
+.platform-tile-meta {
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+    line-height: 1.15;
+}
+
+.platform-tile-name {
+    color: #a1a1aa;
+    font-size: 12px;
+    font-weight: 600;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.platform-tile-count {
+    color: #e6e6ef;
+    font-size: 18px;
+    font-weight: 700;
+    font-family: "SF Mono", Monaco, monospace;
+}
+
+.platform-tile-pip {
+    position: absolute;
+    top: 7px;
+    right: 7px;
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: #faad14;
+}
+
 .request-path {
     display: grid;
-    grid-template-columns: repeat(3, minmax(180px, 1fr));
+    grid-template-columns: repeat(2, minmax(180px, 1fr));
     gap: 12px;
     padding-bottom: 14px;
-    border-bottom: 1px solid #f0f0f0;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.08);
 }
 
 .request-path-step {
@@ -1342,16 +1636,16 @@ onUnmounted(() => {
     align-items: center;
     gap: 6px;
     margin-bottom: 5px;
-    color: #595959;
+    color: #a1a1aa;
     font-size: 12px;
 }
 
 .selected-model-summary {
     margin: 14px 0;
     padding: 12px;
-    border: 1px solid #e6f4ff;
+    border: 1px solid rgba(229, 77, 94, 0.28);
     border-radius: 6px;
-    background: #f8fcff;
+    background: #121a2b;
 }
 
 .selected-model-heading {
@@ -1365,7 +1659,7 @@ onUnmounted(() => {
 .model-id {
     display: block;
     margin-top: 2px;
-    color: #8c8c8c;
+    color: #a1a1aa;
     font-family: 'SF Mono', 'Monaco', monospace;
     font-size: 11px;
     overflow-wrap: anywhere;
@@ -1380,12 +1674,12 @@ onUnmounted(() => {
 }
 
 .parameter-note {
-    color: #8c8c8c;
+    color: #a1a1aa;
     font-size: 12px;
 }
 
 .parameter-source {
-    color: #8c8c8c;
+    color: #a1a1aa;
     font-size: 11px;
 }
 
@@ -1428,13 +1722,13 @@ onUnmounted(() => {
     align-items: center;
     gap: 6px;
     padding: 4px 12px;
-    background: #fafafa;
+    background: #121a2b;
     border-radius: 6px;
     transition: all 0.2s;
 }
 
 .stat-item:hover {
-    background: #f0f0f0;
+    background: #1a2234;
 }
 
 .stat-item.success {
@@ -1446,7 +1740,7 @@ onUnmounted(() => {
 }
 
 .stat-item.neutral {
-    color: #8c8c8c;
+    color: #a1a1aa;
 }
 
 .stat-value {
@@ -1457,7 +1751,7 @@ onUnmounted(() => {
 
 .stat-label {
     font-size: 12px;
-    color: #8c8c8c;
+    color: #a1a1aa;
 }
 
 /* 工具栏样式 */
@@ -1504,6 +1798,10 @@ onUnmounted(() => {
 }
 
 @media (max-width: 767px) {
+    .platform-rail-grid {
+        grid-template-columns: repeat(auto-fill, minmax(108px, 1fr));
+    }
+
     .request-path {
         grid-template-columns: 1fr;
     }
@@ -1521,7 +1819,7 @@ onUnmounted(() => {
 
 .response-text {
     font-size: 12px;
-    color: #595959;
+    color: #a1a1aa;
 }
 
 /* 多行文本 */
@@ -1542,7 +1840,7 @@ onUnmounted(() => {
 }
 
 .multiline-text.clickable:hover {
-    background: #f0f0f0;
+    background: #1a2234;
 }
 
 .no-media {
@@ -1571,7 +1869,7 @@ onUnmounted(() => {
     height: 160px;
     object-fit: cover;
     border-radius: 4px;
-    border: 1px solid #f0f0f0;
+    border: 1px solid rgba(255, 255, 255, 0.08);
 }
 
 .thumb-video {
@@ -1589,8 +1887,8 @@ onUnmounted(() => {
 .thumb-placeholder {
     width: 160px;
     height: 160px;
-    background: #fafafa;
-    border: 1px dashed #d9d9d9;
+    background: #121a2b;
+    border: 1px dashed rgba(255, 255, 255, 0.16);
     border-radius: 4px;
     display: flex;
     align-items: center;
@@ -1612,8 +1910,8 @@ onUnmounted(() => {
 
 /* 内容框样式 */
 .content-box {
-    background: #fafafa;
-    border: 1px solid #f0f0f0;
+    background: #121a2b;
+    border: 1px solid rgba(255, 255, 255, 0.08);
     border-radius: 4px;
     padding: 12px;
     font-family: 'Consolas', 'Monaco', monospace;
@@ -1626,13 +1924,13 @@ onUnmounted(() => {
 
 .content-box.error-box {
     color: #ff4d4f;
-    background: #fff2f0;
-    border-color: #ffccc7;
+    background: rgba(239, 68, 68, 0.12);
+    border-color: rgba(239, 68, 68, 0.35);
 }
 
 .content-box.reasoning-box {
-    background: #f6ffed;
-    border-color: #b7eb8f;
+    background: rgba(34, 197, 94, 0.12);
+    border-color: rgba(34, 197, 94, 0.35);
     color: #389e0d;
 }
 
@@ -1644,10 +1942,10 @@ onUnmounted(() => {
 }
 
 .media-card-large {
-    border: 1px solid #f0f0f0;
+    border: 1px solid rgba(255, 255, 255, 0.08);
     border-radius: 8px;
     overflow: hidden;
-    background: #fafafa;
+    background: #121a2b;
 }
 
 .media-preview-large {
@@ -1657,7 +1955,7 @@ onUnmounted(() => {
     display: flex;
     align-items: center;
     justify-content: center;
-    background: #f5f5f5;
+    background: #111520;
 }
 
 .media-preview-large img {
@@ -1695,8 +1993,8 @@ onUnmounted(() => {
 
 /* 预览弹窗内容 */
 .preview-text-content {
-    background: #fafafa;
-    border: 1px solid #f0f0f0;
+    background: #121a2b;
+    border: 1px solid rgba(255, 255, 255, 0.08);
     border-radius: 4px;
     padding: 16px;
     font-family: 'Consolas', 'Monaco', monospace;

@@ -1,5 +1,5 @@
 <script setup>
-import { ref, onMounted, onUnmounted } from 'vue';
+import { ref, watch, provide, onMounted, onUnmounted } from 'vue';
 import { useRouter } from 'vue-router';
 import { Modal, message } from 'ant-design-vue';
 import {
@@ -16,15 +16,17 @@ import {
   PictureOutlined,
   HistoryOutlined,
   RocketOutlined,
-  MenuOutlined
+  MenuOutlined,
+  ExportOutlined
 } from '@ant-design/icons-vue';
 import { useSettingsStore } from '@/stores/settings';
 import LoginModal from '@/components/auth/LoginModal.vue';
+import CookieEditorExportGuide from '@/components/tools/CookieEditorExportGuide.vue';
 
 const router = useRouter();
 const settingsStore = useSettingsStore();
 
-const selectedKeys = ref(['dash']);
+const selectedKeys = ref(['history']);
 const collapsed = ref(false);
 const isMobile = ref(false);
 const loginVisible = ref(false);
@@ -52,6 +54,45 @@ const chatModelList = ref([]);
 const chatImageList = ref([]);
 const chatStreamMode = ref(false);
 const chatStreamContent = ref('');
+
+const COOKIE_GUIDE_SEEN_KEY = 'webai2api.cookie-export-guide.seen';
+const cookieGuideOpen = ref(false);
+const cookieGuideNew = ref(!localStorage.getItem(COOKIE_GUIDE_SEEN_KEY));
+const cookieTourOpen = ref(false);
+const cookieTourCurrent = ref(0);
+const COOKIE_BANNER_DISMISS_KEY = 'webai2api.cookie-export-banner.dismissed';
+const cookieBannerDismissed = ref(localStorage.getItem(COOKIE_BANNER_DISMISS_KEY) === '1');
+const cookieTourSteps = [
+  {
+    title: '从这里拷到本机浏览器',
+    description: '不要去点接口测试。点「按步骤导出」，选网站，下载文件，再在自己电脑的 Cookie Editor 里导入。',
+    target: () => document.getElementById('cookie-export-banner') || document.getElementById('cookie-export-guide-btn')
+  }
+];
+
+const markCookieGuideSeen = () => {
+  localStorage.setItem(COOKIE_GUIDE_SEEN_KEY, '1');
+  cookieGuideNew.value = false;
+};
+
+const openCookieGuide = () => {
+  cookieTourOpen.value = false;
+  cookieGuideOpen.value = true;
+  markCookieGuideSeen();
+};
+
+const dismissCookieBanner = () => {
+  cookieBannerDismissed.value = true;
+  localStorage.setItem(COOKIE_BANNER_DISMISS_KEY, '1');
+  markCookieGuideSeen();
+};
+
+provide('openCookieExportGuide', openCookieGuide);
+
+const closeCookieTour = () => {
+  cookieTourOpen.value = false;
+  markCookieGuideSeen();
+};
 
 // 获取模型列表
 const fetchModelList = async () => {
@@ -295,12 +336,13 @@ const openApiTestDrawer = () => {
 
 // 菜单 key 到路由路径的映射
 const menuRoutes = {
-  'dash': '/',
   'history': '/tools/request',
+  'dash': '/dash',
   'settings-server': '/settings/server',
   'settings-workers': '/settings/workers',
   'settings-browser': '/settings/browser',
   'settings-adapters': '/settings/adapters',
+  'settings-providers': '/settings/providers',
   'tools-display': '/tools/display',
   'tools-cache': '/tools/cache',
   'tools-logs': '/tools/logs'
@@ -308,12 +350,28 @@ const menuRoutes = {
 
 // 处理菜单点击
 const handleMenuClick = ({ key }) => {
+  if (key === 'tools-cookie-export') {
+    openCookieGuide();
+    if (isMobile.value) collapsed.value = true;
+    return;
+  }
   const route = menuRoutes[key];
   if (route) {
     router.push(route);
     if (isMobile.value) collapsed.value = true;
   }
 };
+
+const syncSelectedKey = (path) => {
+  const normalized = path.replace(/\/+$/, '') || '/';
+  if (normalized === '/' || normalized.endsWith('/tools/request')) {
+    selectedKeys.value = ['history'];
+    return;
+  }
+  const match = Object.entries(menuRoutes).find(([, route]) => normalized === route || normalized.endsWith(route));
+  if (match) selectedKeys.value = [match[0]];
+};
+watch(() => router.currentRoute.value.path, syncSelectedKey, { immediate: true });
 
 const isInitializing = ref(true);
 
@@ -358,17 +416,13 @@ onMounted(async () => {
   checkScreenSize();
   window.addEventListener('resize', checkScreenSize);
 
-  // 身份验证
+  // OmniNode already unlocked the workspace. Only prompt if the backend
+  // still rejects anonymous admin calls.
   try {
-    if (!settingsStore.token) {
+    const isValid = await settingsStore.checkAuth();
+    if (!isValid) {
+      settingsStore.setToken('');
       loginVisible.value = true;
-    } else {
-      // 使用真实API验证
-      const isValid = await settingsStore.checkAuth();
-      if (!isValid) {
-        settingsStore.setToken(''); // 清除无效token
-        loginVisible.value = true;
-      }
     }
   } catch (e) {
     console.error('Auth check failed', e);
@@ -376,6 +430,9 @@ onMounted(async () => {
   } finally {
     // 隐藏加载状态
     isInitializing.value = false;
+    if (settingsStore.token && cookieGuideNew.value) {
+      setTimeout(() => { cookieTourOpen.value = true; }, 400);
+    }
   }
 
   // 启动后端连接检测（每 5 秒检测一次）
@@ -396,23 +453,32 @@ onMounted(async () => {
     style="height: 100vh; display: flex; align-items: center; justify-content: center;" v-if="isInitializing" />
   <div v-else>
     <LoginModal v-model:visible="loginVisible" />
-    <a-layout style="min-height: 100vh" theme="light">
+    <a-layout style="min-height: 100vh" class="omninode-shell">
       <a-layout-header class="header"
-        :style="{ background: 'rgba(255, 255, 255, 0.7)', backdropFilter: 'blur(20px)', WebkitBackdropFilter: 'blur(20px)', borderBottom: '1.5px solid rgba(0, 0, 0, 0.05)', display: 'flex', alignItems: 'center', padding: isMobile ? '0 12px' : '0 24px', position: 'fixed', width: '100%', top: 0, zIndex: 1000 }">
-        <a-button v-if="isMobile" type="text" @click="collapsed = !collapsed" style="margin-right: 8px; font-size: 18px;">
+        :style="{ background: '#10141e', borderBottom: '1px solid rgba(255, 255, 255, 0.08)', display: 'flex', alignItems: 'center', padding: isMobile ? '0 12px' : '0 24px', position: 'fixed', width: '100%', top: 0, zIndex: 1000 }">
+        <a-button v-if="isMobile" type="text" @click="collapsed = !collapsed" style="margin-right: 8px; font-size: 18px; color: #e6e6ef;">
           <template #icon><MenuOutlined /></template>
         </a-button>
-        <div class="logo" :style="{ fontSize: '1.25rem', fontWeight: 'bold', color: '#1890ff', marginRight: isMobile ? '8px' : '24px' }">
+        <div class="logo" :style="{ fontSize: '1.25rem', fontWeight: 'bold', color: '#e6e6ef', marginRight: isMobile ? '8px' : '24px' }">
           WebAI2API
         </div>
         <a-flex justify="end" align="center" style="flex: 1;" :gap="8">
+          <a-badge :dot="cookieGuideNew" color="#1677ff">
+            <a-button id="cookie-export-guide-btn" type="primary" @click="openCookieGuide"
+              :size="isMobile ? 'small' : 'middle'">
+              <template #icon>
+                <ExportOutlined />
+              </template>
+              <span v-if="!isMobile">导出本机登录</span>
+            </a-button>
+          </a-badge>
           <a-button @click="openApiTestDrawer" :size="isMobile ? 'small' : 'middle'">
             <template #icon>
               <ApiOutlined />
             </template>
             <span v-if="!isMobile">接口测试</span>
           </a-button>
-          <a-button danger :loading="iconLoading" @click="enterIconLoading" :size="isMobile ? 'small' : 'middle'">
+          <a-button v-if="settingsStore.token" danger :loading="iconLoading" @click="enterIconLoading" :size="isMobile ? 'small' : 'middle'">
             <template #icon>
               <PoweroffOutlined />
             </template>
@@ -422,18 +488,18 @@ onMounted(async () => {
       </a-layout-header>
       <a-layout style="margin-top: 64px;">
         <div v-if="isMobile && !collapsed" class="sider-mask" @click="collapsed = true"></div>
-        <a-layout-sider v-model:collapsed="collapsed" collapsible theme="light"
+        <a-layout-sider v-model:collapsed="collapsed" collapsible theme="dark"
           :collapsed-width="isMobile ? 0 : 80"
           :trigger="isMobile ? null : undefined"
           :style="{ position: 'fixed', left: 0, top: '64px', height: 'calc(100vh - 64px)', overflowY: 'auto', zIndex: isMobile ? 200 : 100 }">
           <a-menu v-model:selectedKeys="selectedKeys" mode="inline" @click="handleMenuClick">
-            <a-menu-item key="dash">
-              <DashboardOutlined />
-              <span>状态概览</span>
-            </a-menu-item>
             <a-menu-item key="history">
               <RocketOutlined />
               <span>请求模型</span>
+            </a-menu-item>
+            <a-menu-item key="dash">
+              <DashboardOutlined />
+              <span>状态概览</span>
             </a-menu-item>
             <a-sub-menu key="settings">
               <template #title>
@@ -446,6 +512,7 @@ onMounted(async () => {
               <a-menu-item key="settings-workers">工作池</a-menu-item>
               <a-menu-item key="settings-browser">浏览器</a-menu-item>
               <a-menu-item key="settings-adapters">适配器</a-menu-item>
+              <a-menu-item key="settings-providers">原生网页 Provider</a-menu-item>
             </a-sub-menu>
             <a-sub-menu key="tools">
               <template #title>
@@ -454,6 +521,7 @@ onMounted(async () => {
                   <span>系统管理</span>
                 </span>
               </template>
+              <a-menu-item key="tools-cookie-export">导出本机登录</a-menu-item>
               <a-menu-item key="tools-display">虚拟显示器</a-menu-item>
               <a-menu-item key="tools-cache">缓存与重启</a-menu-item>
               <a-menu-item key="tools-logs">日志查看器</a-menu-item>
@@ -463,6 +531,20 @@ onMounted(async () => {
         <a-layout
           :style="{ marginLeft: isMobile ? '0' : (collapsed ? '80px' : '200px'), padding: isMobile ? '12px' : '16px', transition: 'margin-left 0.2s' }">
           <a-layout-content style="min-height: 280px">
+            <aside
+              v-if="!cookieBannerDismissed"
+              id="cookie-export-banner"
+              class="cookie-export-banner"
+            >
+              <div>
+                <strong>把云端登录拷到自己的浏览器</strong>
+                <p>偶尔想在本机 Chrome / Edge 打开同一个账号，按 4 步导出即可。不要去点右上角的「接口测试」。</p>
+              </div>
+              <div class="cookie-export-banner-actions">
+                <a-button type="primary" @click="openCookieGuide">按步骤导出</a-button>
+                <a-button type="text" @click="dismissCookieBanner">先不用</a-button>
+              </div>
+            </aside>
             <router-view />
           </a-layout-content>
           <a-layout-footer class="footer" style="padding: 0px; margin-top: 10px;">
@@ -517,6 +599,7 @@ onMounted(async () => {
               测试
             </a-button>
           </template>
+          <a-button size="small" style="margin-bottom: 8px;" @click="openCookieGuide">打开导出引导</a-button>
           <div v-if="apiTestResults.cookies.status === 'success'">
             <a-tag color="success">
               <CheckCircleOutlined /> 成功
@@ -569,7 +652,7 @@ onMounted(async () => {
             <a-upload-dragger :file-list="[]" :multiple="true" :before-upload="beforeUpload" @change="handleImageChange"
               accept=".png,.jpg,.jpeg,.gif,.webp" :show-upload-list="false" style="padding: 8px;">
               <p style="margin: 0;">
-                <InboxOutlined style="font-size: 24px; color: #1890ff;" />
+                <InboxOutlined style="font-size: 24px; color: #e54d5e;" />
               </p>
               <p style="font-size: 12px; margin: 4px 0 0 0; color: #8c8c8c;">
                 点击或拖拽上传图片 (PNG/JPEG/GIF/WebP)
@@ -653,6 +736,15 @@ onMounted(async () => {
         </a-card>
       </a-space>
     </a-drawer>
+
+    <CookieEditorExportGuide v-model:open="cookieGuideOpen" />
+    <a-tour
+      v-model:current="cookieTourCurrent"
+      :open="cookieTourOpen"
+      :steps="cookieTourSteps"
+      @close="closeCookieTour"
+      @finish="openCookieGuide"
+    />
   </div>
 </template>
 
@@ -664,12 +756,12 @@ onMounted(async () => {
 }
 
 ::-webkit-scrollbar-thumb {
-  background: #ccc;
+  background: #3a4254;
   border-radius: 3px;
 }
 
 ::-webkit-scrollbar-track {
-  background: #f1f1f1;
+  background: #111520;
 }
 
 .sider-mask {
@@ -680,5 +772,35 @@ onMounted(async () => {
   bottom: 0;
   background: rgba(0, 0, 0, 0.45);
   z-index: 199;
+}
+
+.cookie-export-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+  margin-bottom: 16px;
+  padding: 14px 16px;
+  border: 1px solid rgba(229, 77, 94, 0.35);
+  border-radius: 10px;
+  background: rgba(229, 77, 94, 0.12);
+}
+.cookie-export-banner strong {
+  display: block;
+  font-size: 15px;
+  color: #e6e6ef;
+}
+.cookie-export-banner p {
+  margin: 4px 0 0;
+  color: #a1a1aa;
+  font-size: 13px;
+  line-height: 1.55;
+}
+.cookie-export-banner-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
 }
 </style>
