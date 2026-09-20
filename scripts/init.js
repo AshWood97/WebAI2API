@@ -21,10 +21,18 @@ import { logger } from '../src/utils/logger.js';
 import { select, input } from '@inquirer/prompts';
 import { SocksProxyAgent } from 'socks-proxy-agent';
 import { HttpsProxyAgent } from 'https-proxy-agent';
+import { buildCamoufoxDownloadUrl } from '../src/backend/engine/camoufoxMeta.js';
+import { CAMOUFOX_RELEASE, CAMOUFOX_VERSION_JSON } from './camoufoxRelease.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PROJECT_ROOT = path.join(__dirname, '..');
 const TEMP_DIR = path.join(PROJECT_ROOT, 'data', 'temp');
+
+// 与 camoufox-js@0.12 对齐：便携安装目录（与 PROJECT_ROOT 一致，避免 cwd 漂移）
+process.env.CAMOUFOX_INSTALL_DIR = process.env.CAMOUFOX_INSTALL_DIR
+    || path.join(PROJECT_ROOT, 'camoufox');
+
+export { CAMOUFOX_RELEASE, CAMOUFOX_VERSION_JSON };
 
 /**
  * 解析命令行代理参数
@@ -427,22 +435,7 @@ async function installBetterSqlite3(platform, arch, abi, proxyUrl) {
  * 构建 Camoufox 下载 URL
  */
 function getCamoufoxUrl(platform, arch) {
-    const version = '135.0.1-beta.24';
-    const platformMap = {
-        'win32': 'win',
-        'darwin': 'mac',
-        'linux': 'lin'
-    };
-
-    const archMap = {
-        'x64': 'x86_64',
-        'arm64': 'arm64'
-    };
-
-    const platformName = platformMap[platform];
-    const archName = archMap[arch];
-
-    return `https://github.com/daijro/camoufox/releases/download/v${version}/camoufox-${version}-${platformName}.${archName}.zip`;
+    return buildCamoufoxDownloadUrl(CAMOUFOX_RELEASE, platform, arch);
 }
 
 /**
@@ -488,10 +481,7 @@ async function installCamoufox(platform, arch, proxyUrl) {
 
     // 创建 version.json
     const versionJsonPath = path.join(camoufoxDir, 'version.json');
-    const versionData = {
-        version: "135.0",
-        release: "beta.24"
-    };
+    const versionData = { ...CAMOUFOX_VERSION_JSON };
     fs.writeFileSync(versionJsonPath, JSON.stringify(versionData, null, 2), 'utf8');
     logger.info('初始化', `已生成 version.json: ${versionJsonPath}`);
 
@@ -503,7 +493,10 @@ async function installCamoufox(platform, arch, proxyUrl) {
 /**
  * 主流程
  */
-(async () => {
+import { fileURLToPath as _initFileUrl } from 'url';
+const _isInitMain = process.argv[1] === _initFileUrl(import.meta.url);
+
+async function main() {
     try {
         logger.info('初始化', '========================================');
         logger.info('初始化', '依赖初始化脚本启动');
@@ -601,7 +594,12 @@ async function installCamoufox(platform, arch, proxyUrl) {
         logger.error('初始化', '初始化失败', { error: err.message });
         process.exit(1);
     }
-})();
+}
+
+if (_isInitMain) {
+    main();
+}
+
 
 /**
  * 下载 GeoLite2-City.mmdb 到 camoufox 目录
@@ -671,10 +669,7 @@ function fixVersionJson() {
         return;
     }
 
-    const versionData = {
-        version: "135.0",
-        release: "beta.24"
-    };
+    const versionData = { ...CAMOUFOX_VERSION_JSON };
 
     fs.writeFileSync(versionJsonPath, JSON.stringify(versionData, null, 2), 'utf8');
     logger.info('初始化', `已生成 version.json: ${versionJsonPath}`);

@@ -5,6 +5,38 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.8.0] - 2026-09-18
+
+### 🔄 Changed — Camoufox 基座升级（FF135 → FF152）
+
+上游 Camoufox 官方指出 FF135 构建已不适合现代反爬，并将 **v152.0.4-beta.30** 标为 latest。
+
+- **依赖**
+  - `camoufox-js` 0.8.3 → **^0.12.0**
+  - `playwright-core` 1.57.0 → **1.60.0**（peer `<1.61.0`）
+  - `fingerprint-generator` → **^2.1.86**
+- **安装**
+  - `scripts/init.js` 下载 **v152.0.4-beta.30**
+  - 新增 `CAMOUFOX_INSTALL_DIR` 环境注入（`src/backend/engine/camoufoxEnv.js`），替代 pkgman/locale 便携补丁
+  - `version.json` → `{ version: "152.0.4", release: "beta.30" }`
+- **补丁**
+  - 移除 `camoufox-js@0.8.3` locale/pkgman/utils 补丁
+  - 仅保留 **SOCKS5 proxy origin=null** 修复：`patches/camoufox-js@0.12.0.utils.patched.js`
+- **启动器（launcher）**
+  - 默认**不再硬编码** `ff_version: 135`，跟随已安装内核
+  - 持久化指纹 UA 主版本自动迁移到已安装 Firefox 主版本
+  - 使用 Camoufox `window: [w,h]`，移除强制 `setViewportSize`（避免 #666 维度冲突）
+  - 默认 `humanizeCursor: "camou"`，启用 FF152 修复后的内核拟人轨迹
+  - 暴露 `browser.camoufox.*`：`mainWorldEval` / `enableCache` / `disableInstantAnimations` / `humanizeMaxTime` / `blockWebRtc` / `geoip`
+- **自检**
+  - preflight 识别 Camoufox 内核版本；major < 146 时提示升级
+
+### ✨ Added
+
+- `src/backend/engine/camoufoxEnv.js`、`camoufoxMeta.js`
+- `npm run test:camoufox-upgrade`（`scripts/test-camoufox-upgrade.mjs`）
+- `docs/compose/spec/camoufox-ff152-upgrade.md`
+
 ## [3.6.7] - 2026-04-24
 
 ### 🐛 Fixed

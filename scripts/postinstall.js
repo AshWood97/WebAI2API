@@ -1,6 +1,6 @@
 /**
  * @fileoverview npm postinstall 钩子脚本
- * @description 在 `npm install` 后自动应用 camoufox-js 补丁。
+ * @description 用于在 `npm install` 后自动应用 camoufox-js 补丁。
  *
  * 用法：在 package.json scripts 中配置 "postinstall": "node scripts/postinstall.js"
  */
@@ -20,11 +20,13 @@ const error = (msg) => console.error(`[postinstall] ❌ ${msg}`);
 /**
  * 补丁文件映射: 源文件名 -> 目标文件名
  * 供 preflight.js 自检系统复用
+ *
+ * camoufox-js@0.12 起：
+ * - 便携安装目录改用 CAMOUFOX_INSTALL_DIR（见 src/backend/engine/camoufoxEnv.js），不再打 pkgman/locale 补丁
+ * - SOCKS5 proxy origin=null 仍需 utils 补丁
  */
 export const CAMOUFOX_PATCHES = {
-    'camoufox-js@0.8.3.locale.patched.js': 'locale.js',
-    'camoufox-js@0.8.3.pkgman.patched.js': 'pkgman.js',
-    'camoufox-js@0.8.3.utils.patched.js': 'utils.js'  // SOCKS5 代理修复
+    'camoufox-js@0.12.0.utils.patched.js': 'utils.js'
 };
 
 /**
