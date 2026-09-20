@@ -157,3 +157,164 @@ export function buildChatCompletionChunk(content, modelName, finishReason = 'sto
         }]
     };
 }
+
+/**
+ * 构造 Anthropic Messages API 响应（非流式）
+ * 借鉴 WebModel 双协议设计，便于 Claude Code 等客户端接入
+ * @param {string} content - 响应文本
+ * @param {string} [modelName] - 模型名称
+ * @param {string} [reasoningContent] - 思考过程内容
+ * @param {number} [inputTokens=0] - 估算输入 token
+ * @returns {object} Anthropic messages 响应
+ */
+export function buildAnthropicMessage(content, modelName, reasoningContent, inputTokens = 0) {
+    const blocks = [];
+    if (reasoningContent) {
+        blocks.push({ type: 'thinking', thinking: reasoningContent });
+    }
+    blocks.push({ type: 'text', text: content || '' });
+
+    return {
+        id: `msg_${Date.now().toString(36)}`,
+        type: 'message',
+        role: 'assistant',
+        model: modelName || 'default-model',
+        content: blocks,
+        stop_reason: 'end_turn',
+        stop_sequence: null,
+        usage: {
+            input_tokens: inputTokens || Math.max(1, Math.floor((content || '').length / 4)),
+            output_tokens: Math.max(1, Math.floor((content || '').length / 4))
+        }
+    };
+}
+
+/**
+ * 构造 Anthropic Messages API 流式事件
+ * @param {string} content - 响应文本
+ * @param {string} [modelName] - 模型名称
+ * @param {string} [reasoningContent] - 思考过程内容
+ * @returns {string[]} SSE 事件块列表
+ */
+export function buildAnthropicMessageEvents(content, modelName, reasoningContent) {
+    const events = [];
+    const msgId = `msg_${Date.now().toString(36)}`;
+    const model = modelName || 'default-model';
+
+    events.push(`event: message_start\ndata: ${JSON.stringify({
+        type: 'message_start',
+        message: {
+            id: msgId,
+            type: 'message',
+            role: 'assistant',
+            model,
+            content: [],
+            stop_reason: null,
+            stop_sequence: null,
+            usage: { input_tokens: 1, output_tokens: 0 }
+        }
+    })}\n\n`);
+
+    if (reasoningContent) {
+        events.push(`event: content_block_start\ndata: ${JSON.stringify({
+            type: 'content_block_start',
+            index: 0,
+            content_block: { type: 'thinking', thinking: '' }
+        })}\n\n`);
+        events.push(`event: content_block_delta\ndata: ${JSON.stringify({
+            type: 'content_block_delta',
+            index: 0,
+            delta: { type: 'thinking_delta', thinking: reasoningContent }
+        })}\n\n`);
+        events.push(`event: content_block_stop\ndata: ${JSON.stringify({
+            type: 'content_block_stop',
+            index: 0
+        })}\n\n`);
+        events.push(`event: content_block_start\ndata: ${JSON.stringify({
+            type: 'content_block_start',
+            index: 1,
+            content_block: { type: 'text', text: '' }
+        })}\n\n`);
+        events.push(`event: content_block_delta\ndata: ${JSON.stringify({
+            type: 'content_block_delta',
+            index: 1,
+            delta: { type: 'text_delta', text: content || '' }
+        })}\n\n`);
+        events.push(`event: content_block_stop\ndata: ${JSON.stringify({
+            type: 'content_block_stop',
+            index: 1
+        })}\n\n`);
+    } else {
+        events.push(`event: content_block_start\ndata: ${JSON.stringify({
+            type: 'content_block_start',
+            index: 0,
+            content_block: { type: 'text', text: '' }
+        })}\n\n`);
+        events.push(`event: content_block_delta\ndata: ${JSON.stringify({
+            type: 'content_block_delta',
+            index: 0,
+            delta: { type: 'text_delta', text: content || '' }
+        })}\n\n`);
+        events.push(`event: content_block_stop\ndata: ${JSON.stringify({
+            type: 'content_block_stop',
+            index: 0
+        })}\n\n`);
+    }
+
+    events.push(`event: message_delta\ndata: ${JSON.stringify({
+        type: 'message_delta',
+        delta: { stop_reason: 'end_turn', stop_sequence: null },
+        usage: { output_tokens: Math.max(1, Math.floor((content || '').length / 4)) }
+    })}\n\n`);
+
+    events.push(`event: message_stop\ndata: ${JSON.stringify({
+        type: 'message_stop'
+    })}\n\n`);
+
+    return events;
+}
+
+/**
+ * 发送 Anthropic 格式错误响应
+ * @param {import('http').ServerResponse} res - HTTP 响应对象
+ * @param {object} options - 错误选项
+ * @param {string} [options.code] - 错误码
+ * @param {string} [options.message] - 错误消息
+ * @param {number} [options.status] - HTTP 状态码
+ * @param {boolean} [options.isStreaming=false] - 是否流式
+ */
+export function sendAnthropicError(res, options) {
+    const { code, message, status, isStreaming = false } = options;
+    const details = code ? getErrorDetails(code) : null;
+    const errorMessage = message || details?.message || 'unknown error';
+    const httpStatus = status || details?.status || 500;
+
+    // Anthropic 错误类型映射
+    const typeMap = {
+        400: 'invalid_request_error',
+        401: 'authentication_error',
+        403: 'permission_error',
+        404: 'not_found_error',
+        429: 'rate_limit_error',
+        500: 'api_error',
+        502: 'api_error',
+        503: 'overloaded_error'
+    };
+
+    const payload = {
+        type: 'error',
+        error: {
+            type: typeMap[httpStatus] || 'api_error',
+            message: errorMessage
+        }
+    };
+
+    if (isStreaming) {
+        if (!res.writableEnded) {
+            res.write(`event: error\ndata: ${JSON.stringify(payload)}\n\n`);
+            res.end();
+        }
+    } else {
+        sendJson(res, httpStatus, payload);
+    }
+}

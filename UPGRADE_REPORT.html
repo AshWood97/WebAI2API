@@ -1,0 +1,396 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>WebAI2API 本地升级报告 · 3.7.0</title>
+<style>
+  :root {
+    --canvas: #09090b;
+    --surface: #111113;
+    --surface-2: #1a1a1f;
+    --border: #1f1f23;
+    --border-hover: #2a2a30;
+    --ink: #e4e4e7;
+    --ink-2: #a1a1aa;
+    --ink-3: #52525b;
+    --accent: #6366f1;
+    --accent-2: #818cf8;
+    --accent-muted: rgba(99, 102, 241, 0.12);
+    --ok: #22c55e;
+    --ok-muted: rgba(34, 197, 94, 0.15);
+    --bad: #ef4444;
+    --bad-muted: rgba(239, 68, 68, 0.12);
+    --warn: #eab308;
+    --warn-muted: rgba(234, 179, 8, 0.12);
+    --mono: "SF Mono", "Fira Code", Consolas, "Liberation Mono", monospace;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { background: var(--canvas); color: var(--ink); font-family: -apple-system, BlinkMacSystemFont, "Inter", "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif; line-height: 1.55; }
+  body { padding: 28px 20px 64px; }
+  .wrap { max-width: 980px; margin: 0 auto; }
+  header.top {
+    background: var(--surface);
+    box-shadow: 0 0 0 1px var(--border);
+    border-radius: 12px;
+    padding: 22px 24px;
+    margin-bottom: 20px;
+  }
+  .kicker { font-size: 12px; font-weight: 500; letter-spacing: 0.08em; text-transform: uppercase; color: var(--accent); margin-bottom: 8px; }
+  h1 { font-size: 22px; font-weight: 600; letter-spacing: -0.02em; margin-bottom: 8px; }
+  .sub { color: var(--ink-2); font-size: 14px; max-width: 72ch; }
+  .meta { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 14px; }
+  .chip {
+    font-family: var(--mono); font-size: 12px; color: var(--ink-2);
+    background: var(--canvas); box-shadow: 0 0 0 1px var(--border);
+    border-radius: 6px; padding: 4px 10px;
+  }
+  .chip.ok { color: var(--ok); box-shadow: 0 0 0 1px rgba(34,197,94,.35); background: var(--ok-muted); }
+  .chip.accent { color: var(--accent-2); box-shadow: 0 0 0 1px rgba(99,102,241,.35); background: var(--accent-muted); }
+
+  .grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin-bottom: 20px; }
+  .stat {
+    background: var(--canvas); box-shadow: 0 0 0 1px var(--border);
+    border-radius: 12px; padding: 14px 16px;
+  }
+  .stat .label { font-size: 11px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--ink-3); margin-bottom: 6px; }
+  .stat .value { font-size: 22px; font-weight: 700; }
+  .stat .value.ok { color: var(--ok); }
+  .stat .value.accent { color: var(--accent-2); }
+
+  .card {
+    background: var(--surface);
+    box-shadow: 0 0 0 1px var(--border);
+    border-radius: 12px;
+    margin-bottom: 16px;
+    overflow: hidden;
+  }
+  .card > header {
+    padding: 14px 18px;
+    border-bottom: 1px solid var(--border);
+    font-size: 13px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em;
+  }
+  .card .body { padding: 16px 18px 18px; }
+  .card p { color: var(--ink-2); font-size: 14px; margin-bottom: 12px; }
+  .card p:last-child { margin-bottom: 0; }
+
+  table { width: 100%; border-collapse: collapse; font-size: 13.5px; }
+  th, td { text-align: left; padding: 10px 12px; border-bottom: 1px solid var(--border); vertical-align: top; }
+  th { color: var(--ink-3); font-size: 11px; text-transform: uppercase; letter-spacing: 0.06em; font-weight: 600; background: var(--canvas); }
+  tr:last-child td { border-bottom: none; }
+  td.mono, .mono { font-family: var(--mono); font-size: 12.5px; }
+  .badge {
+    display: inline-block; font-size: 11px; font-weight: 500; border-radius: 6px; padding: 2px 8px;
+    font-family: var(--mono);
+  }
+  .badge.yes { background: var(--ok-muted); color: var(--ok); }
+  .badge.new { background: var(--accent-muted); color: var(--accent-2); }
+  .badge.partial { background: var(--warn-muted); color: var(--warn); }
+  .badge.no { background: var(--bad-muted); color: var(--bad); }
+
+  .cols { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+  ul.plain { list-style: none; }
+  ul.plain li { padding: 8px 0; border-bottom: 1px solid var(--border); color: var(--ink-2); font-size: 14px; }
+  ul.plain li:last-child { border-bottom: none; }
+  ul.plain li strong { color: var(--ink); font-weight: 500; }
+  code.endpoint {
+    font-family: var(--mono); font-size: 12px; color: var(--accent-2);
+    background: var(--canvas); box-shadow: 0 0 0 1px var(--border);
+    border-radius: 6px; padding: 2px 8px; white-space: nowrap;
+  }
+  .method { font-family: var(--mono); font-size: 11px; color: var(--ink-3); margin-right: 6px; }
+  .note {
+    margin-top: 10px; padding: 10px 12px; border-radius: 8px;
+    background: var(--accent-muted); color: var(--ink-2); font-size: 13px;
+    box-shadow: 0 0 0 1px rgba(99,102,241,.2);
+  }
+  .note code { font-family: var(--mono); color: var(--accent-2); font-size: 12px; }
+  footer {
+    margin-top: 28px; text-align: center; color: var(--ink-3); font-size: 12px;
+  }
+  @media (max-width: 760px) {
+    .grid, .cols { grid-template-columns: 1fr 1fr; }
+    .cols { grid-template-columns: 1fr; }
+    body { padding: 16px 12px 40px; }
+    .card .body { padding: 12px; }
+  }
+  @media (max-width: 480px) {
+    .grid { grid-template-columns: 1fr; }
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header class="top">
+    <div class="kicker">Local Upgrade Report</div>
+    <h1>WebAI2API 本地升级 · v3.7.0</h1>
+    <p class="sub">
+      在 foxhui/WebAI2API 主仓最后实质更新（2026-07-10）之后，对照仍活跃的同类项目
+      <strong>Amm1rr/WebAI-to-API</strong> 与 <strong>linuxhsj/WebModel</strong>，把值得借鉴的协议层与运维能力落到本地仓库。
+      上游的 Camoufox 反检测、多实例并发、适配器广度全部保留。
+    </p>
+    <div class="meta">
+      <span class="chip ok">pnpm install ✓</span>
+      <span class="chip accent">local branch 3.7.0</span>
+      <span class="chip">upstream last: 2026-07-10</span>
+      <span class="chip">report date: 2026-09-18</span>
+    </div>
+  </header>
+
+  <div class="grid">
+    <div class="stat">
+      <div class="label">新增 API 端点</div>
+      <div class="value accent">10+</div>
+    </div>
+    <div class="stat">
+      <div class="label">协议</div>
+      <div class="value ok">OpenAI + Anthropic</div>
+    </div>
+    <div class="stat">
+      <div class="label">借鉴来源</div>
+      <div class="value">2 个活跃项目</div>
+    </div>
+  </div>
+
+  <div class="card">
+    <header>三项目定位对比</header>
+    <div class="body" style="padding:0">
+      <table>
+        <thead>
+          <tr>
+            <th>维度</th>
+            <th>WebAI2API（本地升级后）</th>
+            <th>WebAI-to-API</th>
+            <th>WebModel</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>主仓活跃度</td>
+            <td><span class="badge partial">上游放缓</span> 本地已补齐</td>
+            <td><span class="badge yes">活跃</span> v0.7.0 (2026-09)</td>
+            <td><span class="badge partial">较新</span> ~86 stars</td>
+          </tr>
+          <tr>
+            <td>多平台广度</td>
+            <td><span class="badge yes">强</span> Claude/ChatGPT/Gemini/DeepSeek/豆包/Sora…</td>
+            <td><span class="badge partial">中</span> Gemini 为主 + fallback</td>
+            <td><span class="badge yes">强</span> 11 平台（宣称）</td>
+          </tr>
+          <tr>
+            <td>反检测</td>
+            <td><span class="badge yes">Camoufox + 拟人操作</span></td>
+            <td><span class="badge partial">Playwright / WebAPI</span></td>
+            <td><span class="badge partial">Chrome CDP 复用</span></td>
+          </tr>
+          <tr>
+            <td>OpenAI 协议</td>
+            <td><span class="badge yes">已有 + Stateless</span></td>
+            <td><span class="badge yes">成熟</span></td>
+            <td><span class="badge yes">有</span></td>
+          </tr>
+          <tr>
+            <td>Anthropic 协议</td>
+            <td><span class="badge new">本次新增 /v1/messages</span></td>
+            <td><span class="badge no">无</span></td>
+            <td><span class="badge yes">原生双协议</span></td>
+          </tr>
+          <tr>
+            <td>健康/就绪探针</td>
+            <td><span class="badge new">/health /ready 本次新增</span></td>
+            <td><span class="badge yes">原生 /health /ready</span></td>
+            <td><span class="badge yes">/webmodel/health</span></td>
+          </tr>
+          <tr>
+            <td>Stateless API</td>
+            <td><span class="badge new">本次新增</span></td>
+            <td><span class="badge yes">/v1/stateless/*</span></td>
+            <td><span class="badge partial">客户端自持</span></td>
+          </tr>
+          <tr>
+            <td>OpenAPI 文档</td>
+            <td><span class="badge new">/openapi.json 本次新增</span></td>
+            <td><span class="badge yes">Swagger/ReDoc</span></td>
+            <td><span class="badge no">无</span></td>
+          </tr>
+          <tr>
+            <td>运行时诊断 API</td>
+            <td><span class="badge new">runtime/auth/providers 本次新增</span></td>
+            <td><span class="badge yes">runtime/auth status</span></td>
+            <td><span class="badge yes">providers 视图</span></td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <div class="card">
+    <header>本次落地的升级点</header>
+    <div class="body">
+      <div class="cols">
+        <div>
+          <p style="color:var(--ink);font-weight:500;margin-bottom:10px">借鉴 WebModel（双协议）</p>
+          <ul class="plain">
+            <li>
+              <span class="method">POST</span>
+              <code class="endpoint">/v1/messages</code><br />
+              <strong>Anthropic Messages API</strong>，Claude Code / Anthropic SDK 可直连。
+              支持 system、text/image blocks、流式 SSE、thinking 块透传。
+            </li>
+            <li>
+              <span class="method">GET</span>
+              <code class="endpoint">/v1/providers</code><br />
+              适配器 × 模型 × Worker 聚合状态视图。
+            </li>
+          </ul>
+        </div>
+        <div>
+          <p style="color:var(--ink);font-weight:500;margin-bottom:10px">借鉴 WebAI-to-API（运维契约）</p>
+          <ul class="plain">
+            <li>
+              <span class="method">GET</span>
+              <code class="endpoint">/health</code>
+              <code class="endpoint">/ready</code><br />
+              免鉴权存活/就绪探针；安全模式或登录模式时 ready 返回 503。
+            </li>
+            <li>
+              <span class="method">POST</span>
+              <code class="endpoint">/v1/stateless/chat/completions</code><br />
+              客户端自持完整历史；拒绝 <span class="mono">conversation_id</span>。
+            </li>
+            <li>
+              <span class="method">GET</span>
+              <code class="endpoint">/openapi.json</code><br />
+              OpenAPI 3.0 契约，覆盖全部新增端点。
+            </li>
+            <li>
+              <span class="method">GET</span>
+              <code class="endpoint">/v1/runtime/status</code>
+              <code class="endpoint">/v1/auth/status</code><br />
+              队列、Worker、模型、系统资源、今日统计与登录就绪状态。
+            </li>
+          </ul>
+        </div>
+      </div>
+      <div class="note">
+        上游优势保留：Camoufox 反检测、多窗口并发与账号隔离、LMArena/Gemini/ChatGPT/DeepSeek/豆包/Sora 等广适配、WebUI 管理、任务队列与故障转移。
+        本次只做<strong>协议层与运维层</strong>增量，不动浏览器自动化内核。
+      </div>
+    </div>
+  </div>
+
+  <div class="card">
+    <header>新增端点速查</header>
+    <div class="body" style="padding:0">
+      <table>
+        <thead>
+          <tr><th>方法</th><th>路径</th><th>鉴权</th><th>说明</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td class="mono">GET</td>
+            <td class="mono">/health</td>
+            <td><span class="badge yes">免鉴权</span></td>
+            <td>进程存活 + 版本 + uptime</td>
+          </tr>
+          <tr>
+            <td class="mono">GET</td>
+            <td class="mono">/ready</td>
+            <td><span class="badge yes">免鉴权</span></td>
+            <td>Pool / 安全模式 / 登录模式就绪</td>
+          </tr>
+          <tr>
+            <td class="mono">GET</td>
+            <td class="mono">/openapi.json</td>
+            <td><span class="badge yes">免鉴权</span></td>
+            <td>OpenAPI 3.0 契约</td>
+          </tr>
+          <tr>
+            <td class="mono">POST</td>
+            <td class="mono">/v1/messages</td>
+            <td><span class="badge accent">Bearer</span></td>
+            <td>Anthropic Messages（流式/非流式）</td>
+          </tr>
+          <tr>
+            <td class="mono">POST</td>
+            <td class="mono">/v1/stateless/chat/completions</td>
+            <td><span class="badge accent">Bearer</span></td>
+            <td>无状态 OpenAI chat</td>
+          </tr>
+          <tr>
+            <td class="mono">GET</td>
+            <td class="mono">/v1/stateless/models</td>
+            <td><span class="badge accent">Bearer</span></td>
+            <td>仅文本模型列表</td>
+          </tr>
+          <tr>
+            <td class="mono">GET</td>
+            <td class="mono">/v1/runtime/status</td>
+            <td><span class="badge accent">Bearer</span></td>
+            <td>队列 / Worker / 模型 / 系统 / 统计</td>
+          </tr>
+          <tr>
+            <td class="mono">GET</td>
+            <td class="mono">/v1/auth/status</td>
+            <td><span class="badge accent">Bearer</span></td>
+            <td>Worker 浏览器就绪状态</td>
+          </tr>
+          <tr>
+            <td class="mono">GET</td>
+            <td class="mono">/v1/providers</td>
+            <td><span class="badge accent">Bearer</span></td>
+            <td>适配器/模型/Worker 聚合</td>
+          </tr>
+          <tr>
+            <td class="mono">GET</td>
+            <td class="mono">/v1/openapi.json</td>
+            <td><span class="badge accent">Bearer</span></td>
+            <td>带模型枚举的 OpenAPI</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <div class="card">
+    <header>代码变更位置</header>
+    <div class="body">
+      <ul class="plain">
+        <li><strong>src/server/api/anthropic/routes.js</strong> — 新增 Anthropic Messages 路由与请求转换</li>
+        <li><strong>src/server/api/openai/routes.js</strong> — Stateless / runtime / auth / providers 端点</li>
+        <li><strong>src/server/api/openai/openapi.js</strong> — OpenAPI 3.0 schema 生成器</li>
+        <li><strong>src/server/api/index.js</strong> — /health /ready /openapi.json 挂载 + Anthropic 分发</li>
+        <li><strong>src/server/respond.js</strong> — Anthropic 响应构造与错误映射</li>
+        <li><strong>src/server/errors.js</strong> — SERVICE_UNAVAILABLE / INVALID_REQUEST_BODY / NOT_FOUND</li>
+        <li><strong>CHANGELOG.md</strong> — 3.7.0 变更说明</li>
+        <li><strong>scripts/test-upgrade.mjs</strong> — 升级点单元验证脚本</li>
+      </ul>
+      <div class="note">
+        接入 Claude Code 示例：
+        <code>export ANTHROPIC_BASE_URL="http://localhost:3000"</code>
+        <code>export ANTHROPIC_API_KEY="sk-your-token"</code>
+        模型名使用 WebUI/适配器中配置的文本模型 ID（如 claude-text 对应的 model id）。
+      </div>
+    </div>
+  </div>
+
+  <div class="card">
+    <header>未纳入本次升级的候选项</header>
+    <div class="body">
+      <ul class="plain">
+        <li><strong>Tool Calling 原生执行</strong> — 浏览器模拟链路无法真实执行 function call；当前将 tool_use 块序列化进提示词上下文。</li>
+        <li><strong>Google Generative AI 兼容端点</strong>（WebAI-to-API 的 <span class="mono">/v1beta/models/...</span>）— 需要额外客户端生态，优先级低于 Anthropic。</li>
+        <li><strong>会话持久化管理</strong>（/v1/conversations）— 本地 WebAI2API 文本模式已是虚拟上下文，无服务端会话可清理；Stateless 端点覆盖主要需求。</li>
+        <li><strong>npx 一键启动</strong>（WebModel）— 依赖 Camoufox 浏览器资源，不适合纯 npx 分发；现有 Docker / npm start 更合适。</li>
+        <li><strong>gpt4free fallback</strong>（WebAI-to-API）— 与 Camoufox 真浏览器路线定位不同，混合会增加账号风控面。</li>
+      </ul>
+    </div>
+  </div>
+
+  <footer>
+    WebAI2API local upgrade · inspired by Amm1rr/WebAI-to-API &amp; linuxhsj/WebModel · MIT
+  </footer>
+</div>
+</body>
+</html>

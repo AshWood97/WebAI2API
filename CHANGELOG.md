@@ -5,6 +5,51 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.7.0] - 2026-09-18
+
+本地升级版（借鉴 WebAI-to-API / WebModel），在上游主仓最后更新（2026-07-10）后补齐运维与协议能力。
+
+### ✨ Added
+
+- **双协议 Anthropic Messages API**（借鉴 linuxhsj/WebModel）
+  - `POST /v1/messages`：兼容 Claude Code / Anthropic SDK
+  - 支持 system、text/image content blocks、流式 SSE
+  - 自动将 Anthropic 请求转换为内部生成管线，并回写 Anthropic 格式
+  - 错误响应使用 Anthropic `type: error` 契约
+
+- **Stateless 聊天端点**（借鉴 Amm1rr/WebAI-to-API）
+  - `POST /v1/stateless/chat/completions`：客户端自持完整历史
+  - `GET /v1/stateless/models`：仅列出文本模型
+  - 拒绝 `conversation_id`，强制无服务端续写
+
+- **健康与运行时诊断**（借鉴 WebAI-to-API / WebModel）
+  - `GET /health` / `GET /healthz`：进程存活（免鉴权）
+  - `GET /ready` / `GET /readyz`：就绪检查（免鉴权，安全模式/登录模式返回 503）
+  - `GET /v1/runtime/status`：队列、Worker、模型、系统、今日统计
+  - `GET /v1/auth/status`：Worker 登录/浏览器就绪状态
+  - `GET /v1/providers`：适配器/模型/Worker 聚合视图
+
+- **OpenAPI 契约**（借鉴 WebAI-to-API）
+  - `GET /openapi.json`（根路径，免鉴权）
+  - `GET /v1/openapi.json`
+  - 覆盖 OpenAI、Anthropic、Stateless、Runtime 端点
+
+- **错误码补充**
+  - `SERVICE_UNAVAILABLE` / `INVALID_REQUEST_BODY` / `NOT_FOUND`
+  - Anthropic 错误类型映射（invalid_request / rate_limit / overloaded 等）
+
+### 🔄 Changed
+
+- 安全模式 / 登录模式下仍允许 `/v1/models`、runtime/auth/providers 诊断端点
+- OpenAI 404 响应改为标准 JSON 错误体
+- 版本号提升至 3.7.0
+
+### 📖 参考
+
+- Amm1rr/WebAI-to-API：Stateless API、/health /ready、runtime/auth status、OpenAPI
+- linuxhsj/WebModel：Anthropic 双协议 `/v1/messages`、providers 视图
+- WebAI2API 上游优势仍保留：Camoufox 反检测、多实例并发、适配器广度、WebUI
+
 ## [3.6.7] - 2026-04-24
 
 ### 🐛 Fixed

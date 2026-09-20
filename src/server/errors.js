@@ -47,6 +47,12 @@ export const ERROR_CODES = {
     INTERNAL_ERROR: 'INTERNAL_ERROR',
     /** 生成失败 */
     GENERATION_FAILED: 'GENERATION_FAILED',
+    /** 服务不可用（安全模式/登录模式） */
+    SERVICE_UNAVAILABLE: 'SERVICE_UNAVAILABLE',
+    /** 请求体无效 */
+    INVALID_REQUEST_BODY: 'INVALID_REQUEST_BODY',
+    /** 资源不存在 */
+    NOT_FOUND: 'NOT_FOUND',
 };
 
 /**
@@ -113,6 +119,21 @@ const ERROR_DETAILS = {
         message: '图片生成失败',
         status: 502,
         type: ERROR_TYPES.SERVER_ERROR,
+    },
+    [ERROR_CODES.SERVICE_UNAVAILABLE]: {
+        message: '服务暂时不可用',
+        status: 503,
+        type: ERROR_TYPES.SERVER_ERROR,
+    },
+    [ERROR_CODES.INVALID_REQUEST_BODY]: {
+        message: '请求体无效',
+        status: 400,
+        type: ERROR_TYPES.INVALID_REQUEST,
+    },
+    [ERROR_CODES.NOT_FOUND]: {
+        message: '资源不存在',
+        status: 404,
+        type: ERROR_TYPES.INVALID_REQUEST,
     },
 };
 

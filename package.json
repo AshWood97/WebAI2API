@@ -1,7 +1,7 @@
 {
 	"name": "webai-2api",
-	"version": "3.0.0",
-	"description": "基于 Playwright + Camoufox 的自动化图像生成工具",
+	"version": "3.7.0",
+	"description": "Web AI to OpenAI/Anthropic API via Camoufox — multi-adapter browser automation bridge",
 	"license": "MIT",
 	"author": "foxhui",
 	"type": "module",
