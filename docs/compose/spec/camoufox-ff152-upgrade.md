@@ -3,7 +3,7 @@ feature: camoufox-ff152-upgrade
 status: delivered
 updated: 2026-09-20
 branch: feat/camoufox-ff152
-commits: beac6c9..(see branch head)
+commits: beac6c979d81aea7d84a1d7b2a7e7ba686237cfb..f7630ad06ce8ee710869b5c554ffbb6c9414a135
 ---
 
 # Camoufox FF152 升级
