@@ -8,6 +8,8 @@
  * - 清理采用三级退出：Playwright close -> SIGTERM -> SIGKILL
  */
 
+// 必须先设置 CAMOUFOX_INSTALL_DIR，再加载 camoufox-js
+import './camoufoxEnv.js';
 import { Camoufox } from 'camoufox-js';
 import { sampleWebGL } from 'camoufox-js/dist/webgl/sample.js';
 import { FingerprintGenerator } from 'fingerprint-generator';
@@ -18,6 +20,13 @@ import { createCursor } from 'ghost-cursor-playwright-port';
 import { getRealViewport, clamp, random, sleep } from './utils.js';
 import { logger } from '../../utils/logger.js';
 import { getBrowserProxy, cleanupProxy } from '../../utils/proxy.js';
+import { PROJECT_CAMOUFOX_DIR } from './camoufoxEnv.js';
+import {
+    readCamoufoxVersion,
+    rewriteFingerprintUserAgent,
+    buildCamoufoxCapabilityOptions,
+    camoufoxConfigKeySupported
+} from './camoufoxMeta.js';
 
 // 全局状态：用于在登录模式下管理残留进程与复用上下文
 let globalBrowserProcess = null;
@@ -126,10 +135,11 @@ function getWebGLPlatform(osName) {
 }
 
 /**
- * 获取或生成持久化指纹 (含 WebGL 配置校验)
+ * 获取或生成持久化指纹 (含 WebGL 配置校验与 UA 主版本迁移)
  * @param {string} filePath - JSON文件保存路径
+ * @param {number|null} targetMajor - 已安装 Camoufox 的 Firefox 主版本
  */
-async function getPersistentFingerprint(filePath) {
+async function getPersistentFingerprint(filePath, targetMajor = null) {
     // 确保 data 目录存在
     const dir = path.dirname(filePath);
     if (!fs.existsSync(dir)) {
@@ -184,15 +194,6 @@ async function getPersistentFingerprint(filePath) {
         const generator = new FingerprintGenerator(generatorOptions);
         fingerprintData = generator.getFingerprint().fingerprint;
 
-        // 清洗 UA 版本
-        if (fingerprintData.navigator) {
-            let ua = fingerprintData.navigator.userAgent;
-            const TARGET_VERSION = "135.0";
-            ua = ua.replace(/rv:[\d\.]+/g, `rv:${TARGET_VERSION}`);
-            ua = ua.replace(/Firefox\/[\d\.]+/g, `Firefox/${TARGET_VERSION}`);
-            fingerprintData.navigator.userAgent = ua;
-        }
-
         // 清洗插件数据
         if (fingerprintData.pluginsData) {
             fingerprintData.pluginsData.plugins = [];
@@ -200,6 +201,15 @@ async function getPersistentFingerprint(filePath) {
         }
 
         shouldSave = true;
+    }
+
+    // 3b. UA 主版本对齐已安装 Camoufox（迁移 FF135 等旧指纹）
+    if (fingerprintData && Number.isFinite(targetMajor)) {
+        const { changed } = rewriteFingerprintUserAgent(fingerprintData, targetMajor);
+        if (changed) {
+            logger.info('浏览器', `指纹 UA 已迁移至 Firefox/${targetMajor}.0`);
+            shouldSave = true;
+        }
     }
 
     // 4. 如果 WebGL 配置为空，重新生成
@@ -229,7 +239,7 @@ async function getPersistentFingerprint(filePath) {
         shouldSave = true;
     }
 
-    // 5. 如果有变动，保存回文件
+    // 6. 如果有变动，保存回文件
     if (shouldSave) {
         fs.writeFileSync(filePath, JSON.stringify(fingerprintData, null, 2));
         logger.info('浏览器', `指纹已更新并保存至: ${filePath}`);
@@ -277,40 +287,77 @@ export async function initBrowserBase(config, options = {}) {
 
     const browserConfig = config?.browser || {};
 
+    // 读取已安装 Camoufox 版本（用于 UA 迁移与日志）
+    const camoufoxVer = readCamoufoxVersion(PROJECT_CAMOUFOX_DIR)
+        || readCamoufoxVersion(process.env.CAMOUFOX_INSTALL_DIR || PROJECT_CAMOUFOX_DIR);
+    if (camoufoxVer) {
+        logger.info('浏览器', `[${markLabel}] Camoufox ${camoufoxVer.full} (Firefox ${camoufoxVer.major})`);
+    } else {
+        logger.warn('浏览器', `[${markLabel}] 未找到 camoufox/version.json，UA 迁移跳过`);
+    }
+
     // 获取指纹对象（指纹文件放在对应的 userDataDir 内）
     const fingerprintPath = path.join(userDataDir, 'fingerprint.json');
-    const myFingerprint = await getPersistentFingerprint(fingerprintPath);
+    const myFingerprint = await getPersistentFingerprint(fingerprintPath, camoufoxVer?.major ?? null);
 
     // 构造 Camoufox 启动选项
     const currentOS = getCurrentOS();
+    const capability = buildCamoufoxCapabilityOptions(browserConfig, camoufoxVer, myFingerprint);
+
+    const camoufoxConfig = {
+        forceScopeAccess: true,
+        // Canvas 抗指纹：注入固定噪点偏移
+        'canvas:aaOffset': myFingerprint.canvasOffset ?? 0,
+        'canvas:aaCapOffset': true
+    };
+
+    // 硬件/动画相关：仅当 properties 支持或作为 firefox pref
+    const firefoxUserPrefs = {
+        // 禁用背景模糊滤镜 (高 CPU 消耗)
+        'layout.css.backdrop-filter.enabled': false,
+        // 告诉网页用户倾向于减少动画 (触发网页自身的优化)
+        'ui.prefersReducedMotion': 1,
+        // 站点隔离
+        ...(browserConfig.fission === false ? { 'fission.autostart': false } : {})
+    };
+
+    // disableInstantAnimations：FF152 properties 已含该键时写入 camoufox config
+    if (capability._disableInstantAnimations) {
+        const propsPath = path.join(
+            PROJECT_CAMOUFOX_DIR,
+            'Camoufox.app', 'Contents', 'MacOS', 'properties.json'
+        );
+        const linuxPropsPath = path.join(PROJECT_CAMOUFOX_DIR, 'properties.json');
+        if (camoufoxConfigKeySupported(propsPath, 'disableInstantAnimations')
+            || camoufoxConfigKeySupported(linuxPropsPath, 'disableInstantAnimations')) {
+            camoufoxConfig.disableInstantAnimations = true;
+            firefoxUserPrefs['ui.prefersReducedMotion'] = 1;
+        } else {
+            firefoxUserPrefs['ui.prefersReducedMotion'] = 1;
+        }
+    }
+
     const camoufoxLaunchOptions = {
         executable_path: browserConfig.path || undefined,
         headless: headlessMode,
         user_data_dir: userDataDir,
-        ff_version: 135,
         fingerprint: myFingerprint,
         os: currentOS,
         i_know_what_im_doing: true,
         webgl_config: myFingerprint.videoCard ? [myFingerprint.videoCard['webGl:vendor'], myFingerprint.videoCard['webGl:renderer']] : undefined,
-        block_webrtc: true,
         exclude_addons: ['UBO'],
-        geoip: true,
-        humanize: browserConfig.humanizeCursor === 'camou',
-        config: {
-            forceScopeAccess: true,
-            // Canvas 抗指纹：注入固定噪点偏移
-            'canvas:aaOffset': myFingerprint.canvasOffset ?? 0,
-            'canvas:aaCapOffset': true
-        },
-        // 关闭动画减轻资源压力
-        firefox_user_prefs: {
-            // 禁用背景模糊滤镜 (高 CPU 消耗)
-            'layout.css.backdrop-filter.enabled': false,
-            // 告诉网页用户倾向于减少动画 (触发网页自身的优化)
-            'ui.prefersReducedMotion': 1,
-            // 站点隔离
-            ...(browserConfig.fission === false ? { 'fission.autostart': false } : {})
-        }
+        humanize: capability.humanize === undefined
+            ? (browserConfig.humanizeCursor === 'camou')
+            : capability.humanize,
+        config: camoufoxConfig,
+        firefox_user_prefs: firefoxUserPrefs,
+        // 新版能力项（ff_version / main_world_eval / enable_cache / window / block_webrtc / geoip）
+        ...(capability.ff_version !== undefined ? { ff_version: capability.ff_version } : {}),
+        ...(capability.main_world_eval !== undefined ? { main_world_eval: capability.main_world_eval } : {}),
+        ...(capability.enable_cache !== undefined ? { enable_cache: capability.enable_cache } : {}),
+        ...(capability.window ? { window: capability.window } : {}),
+        block_webrtc: capability.block_webrtc !== false,
+        geoip: capability.geoip !== false
     };
 
     // 代理配置
@@ -326,7 +373,9 @@ export async function initBrowserBase(config, options = {}) {
     // 构建状态描述
     const statusParts = [];
     statusParts.push(`无头模式: ${headlessMode ? '是' : '否'}`);
+    if (camoufoxVer) statusParts.push(`Camoufox: ${camoufoxVer.full}`);
     if (proxyObj) statusParts.push('代理: 已配置');
+    if (camoufoxLaunchOptions.humanize) statusParts.push('内核拟人轨迹: 开');
     logger.info('浏览器', `[${markLabel}] 浏览器已启动 (${statusParts.join(', ')})`);
 
     // 注册清理处理器
@@ -349,10 +398,14 @@ export async function initBrowserBase(config, options = {}) {
         page = await context.newPage();
     }
 
-    // 强制刷新视口大小 (使用指纹中的屏幕尺寸)
-    const screenWidth = myFingerprint.screen?.availWidth || 1366;
-    const screenHeight = myFingerprint.screen?.availHeight || 768;
-    await page.setViewportSize({ width: screenWidth, height: screenHeight });
+    // 不强制 setViewportSize：与 Camoufox 窗口 spoof / attachNoViewportDefault 协同（#666）
+    // 仅记录当前视口，便于排障
+    try {
+        const vp = page.viewportSize();
+        const screenW = myFingerprint.screen?.availWidth || myFingerprint.screen?.width;
+        const screenH = myFingerprint.screen?.availHeight || myFingerprint.screen?.height;
+        logger.debug('浏览器', `[${markLabel}] 视口: ${vp?.width || 'null'}x${vp?.height || 'null'}，指纹屏幕: ${screenW}x${screenH}`);
+    } catch { /* ignore */ }
 
     // CSS 性能优化注入
     const cssInjectConfig = browserConfig.cssInject || {};

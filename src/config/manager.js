@@ -87,7 +87,16 @@ export function getBrowserConfig() {
         path: browser.path || '',
         headless: browser.headless || false,
         fission: browser.fission !== false, // 默认 true
-        humanizeCursor: browser.humanizeCursor ?? true, // false | true | 'camou'
+        humanizeCursor: browser.humanizeCursor ?? 'camou', // false | true | 'camou'
+        ffVersion: browser.ffVersion ?? null,
+        camoufox: {
+            mainWorldEval: browser.camoufox?.mainWorldEval ?? false,
+            enableCache: browser.camoufox?.enableCache ?? false,
+            disableInstantAnimations: browser.camoufox?.disableInstantAnimations ?? false,
+            humanizeMaxTime: browser.camoufox?.humanizeMaxTime ?? 1.5,
+            blockWebRtc: browser.camoufox?.blockWebRtc !== false,
+            geoip: browser.camoufox?.geoip !== false
+        },
         cssInject: {
             animation: cssInject.animation || false,
             filter: cssInject.filter || false,
@@ -118,6 +127,17 @@ export function saveBrowserConfig(data) {
     if (data.headless !== undefined) config.browser.headless = data.headless;
     if (data.fission !== undefined) config.browser.fission = data.fission;
     if (data.humanizeCursor !== undefined) config.browser.humanizeCursor = data.humanizeCursor;
+    if (data.ffVersion !== undefined) config.browser.ffVersion = data.ffVersion;
+    if (data.camoufox) {
+        if (!config.browser.camoufox) config.browser.camoufox = {};
+        const c = data.camoufox;
+        if (c.mainWorldEval !== undefined) config.browser.camoufox.mainWorldEval = c.mainWorldEval;
+        if (c.enableCache !== undefined) config.browser.camoufox.enableCache = c.enableCache;
+        if (c.disableInstantAnimations !== undefined) config.browser.camoufox.disableInstantAnimations = c.disableInstantAnimations;
+        if (c.humanizeMaxTime !== undefined) config.browser.camoufox.humanizeMaxTime = c.humanizeMaxTime;
+        if (c.blockWebRtc !== undefined) config.browser.camoufox.blockWebRtc = c.blockWebRtc;
+        if (c.geoip !== undefined) config.browser.camoufox.geoip = c.geoip;
+    }
 
     // CSS 性能优化配置
     if (data.cssInject) {

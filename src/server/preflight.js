@@ -7,8 +7,11 @@ import fs from 'fs';
 import path from 'path';
 import os from 'os';
 import crypto from 'crypto';
+import '../backend/engine/camoufoxEnv.js';
 import { logger } from '../utils/logger.js';
 import { CAMOUFOX_PATCHES } from '../../scripts/postinstall.js';
+import { readCamoufoxVersion } from '../backend/engine/camoufoxMeta.js';
+import { CAMOUFOX_MIN_RECOMMENDED_MAJOR } from '../../scripts/camoufoxRelease.js';
 
 const PROJECT_ROOT = process.cwd();
 
@@ -82,10 +85,19 @@ export function preflight() {
         errors.push(`Camoufox 可执行文件缺失，请运行: npm run init`);
     }
 
-    // 4. 检查 version.json
+    // 4. 检查 version.json 并校验内核代际
     const versionJsonPath = path.join(PROJECT_ROOT, 'camoufox', 'version.json');
     if (!fs.existsSync(versionJsonPath)) {
         errors.push('camoufox/version.json 缺失，请运行: npm run init');
+    } else {
+        const ver = readCamoufoxVersion(path.join(PROJECT_ROOT, 'camoufox'));
+        if (!ver) {
+            errors.push('camoufox/version.json 无法解析，请重新运行: npm run init');
+        } else if (ver.major < CAMOUFOX_MIN_RECOMMENDED_MAJOR) {
+            errors.push(`Camoufox 内核过旧 (Firefox ${ver.major})，建议 npm run init 升级至 152 系`);
+        } else {
+            logger.info('服务器', `Camoufox 内核: ${ver.full}`);
+        }
     }
 
     // 5. 检查 GeoLite2-City.mmdb

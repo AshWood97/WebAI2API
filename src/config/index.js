@@ -255,8 +255,17 @@ export function loadConfig() {
     // 设置 browser 配置默认值
     if (!config.browser) config.browser = {};
     if (config.browser.humanizeCursor === undefined) {
-        config.browser.humanizeCursor = true;
+        // Camoufox FF152+ 已修复 juggler 拟人轨迹，默认启用内核 humanize
+        config.browser.humanizeCursor = 'camou';
     }
+    if (!config.browser.camoufox) config.browser.camoufox = {};
+    const camouCfg = config.browser.camoufox;
+    if (camouCfg.mainWorldEval === undefined) camouCfg.mainWorldEval = false;
+    if (camouCfg.enableCache === undefined) camouCfg.enableCache = false;
+    if (camouCfg.disableInstantAnimations === undefined) camouCfg.disableInstantAnimations = false;
+    if (camouCfg.humanizeMaxTime === undefined) camouCfg.humanizeMaxTime = 1.5;
+    if (camouCfg.blockWebRtc === undefined) camouCfg.blockWebRtc = true;
+    if (camouCfg.geoip === undefined) camouCfg.geoip = true;
 
     // 设置 Pool 配置默认值
     if (!config.backend) config.backend = {};

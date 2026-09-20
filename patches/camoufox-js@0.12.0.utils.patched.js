@@ -1,17 +1,12 @@
 /**
  * ========================================
  * PATCHED VERSION - WebAI-2API
+ * camoufox-js@0.12.0 dist/utils.js
  * ========================================
- * 
+ *
  * 修改内容:
- *   - 第 490 行: 修复 SOCKS5 代理 URL.origin 返回 "null" 的问题
- *     原代码: server: proxyUrl.origin,
- *     修改为: server: proxyUrl.protocol + '//' + proxyUrl.host,
- * 
- * 问题原因:
- *   JavaScript 的 new URL('socks5://...').origin 对非标准协议返回 "null" 字符串，
- *   导致浏览器报错 NS_ERROR_UNKNOWN_PROXY_HOST
- * 
+ *   - proxy.server: proxyUrl.origin -> proxyUrl.protocol + '//' + proxyUrl.host
+ *   - 修复 SOCKS5 等非标准协议 new URL().origin === "null" 导致 NS_ERROR_UNKNOWN_PROXY_HOST
  * 搜索 "PATCHED" 可定位所有修改位置
  * ========================================
  */
@@ -92,8 +87,7 @@ function loadProperties(filePath) {
         return acc;
     }, {});
 }
-function validateConfig(configMap, path) {
-    const propertyTypes = loadProperties(path);
+function validateConfig(configMap, propertyTypes) {
     for (const [key, value] of Object.entries(configMap)) {
         const expectedType = propertyTypes[key];
         if (!expectedType) {
@@ -232,15 +226,68 @@ function warnManualConfig(config) {
         LeakWarning.warn("viewport", false);
     }
 }
+const WINDOW_DIM_KEYS = [
+    "window.outerWidth",
+    "window.outerHeight",
+    "window.innerWidth",
+    "window.innerHeight",
+    "document.body.clientWidth",
+    "document.body.clientHeight",
+];
+/**
+ * Whether the CAMOU_CONFIG in a set of launch options spoofs any window
+ * dimension. The config is chunked across CAMOU_CONFIG_<n> env vars, so
+ * reassemble it in index order before looking.
+ */
+export function spoofsWindowDimensions(fromOptions) {
+    const env = fromOptions.env ?? {};
+    const chunks = Object.entries(env)
+        .filter(([key]) => key.startsWith("CAMOU_CONFIG_"))
+        .map(([key, value]) => [Number(key.split("_").pop()), value])
+        .sort(([a], [b]) => a - b);
+    if (chunks.length === 0) {
+        return false;
+    }
+    const blob = chunks.map(([, value]) => value).join("");
+    return WINDOW_DIM_KEYS.some((key) => blob.includes(key));
+}
+/**
+ * Defaults newPage()/newContext() to `viewport: null`.
+ *
+ * Playwright applies a 1280x720 viewport by default, which makes Juggler ask
+ * the content window to become 1280x720. When Camoufox is pinning the window to
+ * a spoofed size, that request can never be satisfied, so the page reports the
+ * Playwright viewport instead of the spoofed dimensions (and a second
+ * newPage() can hang - daijro/camoufox#666).
+ *
+ * Without a viewport, Juggler measures the window instead of resizing it.
+ * An explicit viewport from the caller always wins.
+ */
+export function attachNoViewportDefault(target) {
+    for (const name of ["newPage", "newContext"]) {
+        const original = target[name];
+        if (typeof original !== "function") {
+            continue;
+        }
+        target[name] = (options, ...rest) => original.call(target, options && "viewport" in options
+            ? options
+            : { ...options, viewport: null }, ...rest);
+    }
+    return target;
+}
 async function _asyncAttachVD(browser, virtualDisplay) {
     if (!virtualDisplay) {
         return browser;
     }
-    const originalClose = browser.close;
+    const originalClose = browser.close.bind(browser);
     browser.close = async (...args) => {
-        await originalClose.apply(browser, ...args);
-        if (virtualDisplay) {
-            virtualDisplay.kill();
+        try {
+            return await originalClose(...args);
+        }
+        finally {
+            if (virtualDisplay) {
+                virtualDisplay.kill();
+            }
         }
     };
     browser._virtualDisplay = virtualDisplay;
@@ -254,11 +301,15 @@ export function syncAttachVD(browser, virtualDisplay) {
         // Skip if no virtual display is provided
         return browser;
     }
-    const originalClose = browser.close;
-    browser.close = (...args) => {
-        originalClose.apply(browser, ...args);
-        if (virtualDisplay) {
-            virtualDisplay.kill();
+    const originalClose = browser.close.bind(browser);
+    browser.close = async (...args) => {
+        try {
+            return await originalClose(...args);
+        }
+        finally {
+            if (virtualDisplay) {
+                virtualDisplay.kill();
+            }
         }
     };
     browser._virtualDisplay = virtualDisplay;
@@ -294,15 +345,20 @@ function getProxyUrl(proxy) {
         url.password = password;
     return url;
 }
+/**
+ * Prepare launch options for Playwright's Firefox browser.
+ *
+ * Note: This function only accepts `boolean` for the `headless` parameter.
+ * Callers must normalize `"virtual"` to `boolean` before calling this function.
+ * The virtual display setup is handled separately in the calling function.
+ */
 export async function launchOptions({ config, os, block_images, block_webrtc, block_webgl, disable_coop, webgl_config, geoip, humanize, locale, addons, fonts, custom_fonts_only, exclude_addons, screen, window, fingerprint, ff_version, headless, main_world_eval, executable_path, firefox_user_prefs, proxy, enable_cache, args, env, i_know_what_im_doing, debug, virtual_display, ...launch_options }) {
     // Build the config
     if (!config) {
         config = {};
     }
     // Set default values for optional arguments
-    if (headless === undefined) {
-        headless = false;
-    }
+    const headlessBoolean = headless ?? false;
     if (!addons) {
         addons = [];
     }
@@ -339,7 +395,7 @@ export async function launchOptions({ config, os, block_images, block_webrtc, bl
         throw new Error("OS must be set when using webgl_config");
     }
     // Add the default addons
-    addDefaultAddons(addons, exclude_addons);
+    await addDefaultAddons(addons, exclude_addons);
     // Confirm all addon paths are valid
     if (addons.length > 0) {
         confirmPaths(addons);
@@ -357,7 +413,7 @@ export async function launchOptions({ config, os, block_images, block_webrtc, bl
     // Generate a fingerprint
     if (!fingerprint) {
         fingerprint = generateFingerprint(window, {
-            screen: screen || getScreenCons(headless || "DISPLAY" in env),
+            screen: screen || getScreenCons(headlessBoolean || "DISPLAY" in env),
             operatingSystems,
         });
     }
@@ -369,6 +425,22 @@ export async function launchOptions({ config, os, block_images, block_webrtc, bl
     }
     // Inject the fingerprint into the config
     mergeInto(config, fromBrowserforge(fingerprint, ff_version_str));
+    // Add seeds (BrowserForge doesn't generate these). Mirrors fingerprints.py,
+    // which seeds these right after from_browserforge() with setdefault. Range is
+    // 1..2^32-1 — 0 is excluded because it's a no-op in the C++ managers. Without
+    // a per-launch audio:seed the AudioFingerprintManager defaults to 0, so every
+    // spoofed context returns identical audio samples — a "same machine behind
+    // many identities" tell on CreepJS. setInto is "set only if unset", so a
+    // caller-supplied seed wins (the JS equivalent of setdefault). audio:seed and
+    // canvas:seed only exist since Camoufox 2.0, and the library supports older
+    // builds, so seed only what the installed browser's schema knows.
+    const randint = (min, max) => Math.floor(Math.random() * (max - min + 1)) + min;
+    const knownProperties = loadProperties(executable_path);
+    for (const seed of ["fonts:spacing_seed", "audio:seed", "canvas:seed"]) {
+        if (seed in knownProperties) {
+            setInto(config, seed, randint(1, 4_294_967_295));
+        }
+    }
     const targetOS = getTargetOS(config);
     // Set a random window.history.length
     setInto(config, "window.history.length", Math.floor(Math.random() * 5) + 1);
@@ -390,8 +462,6 @@ export async function launchOptions({ config, os, block_images, block_webrtc, bl
     else {
         updateFonts(config, targetOS);
     }
-    // Set a fixed font spacing seed
-    setInto(config, "fonts:spacing_seed", Math.floor(Math.random() * 1_073_741_824));
     // Handle proxy
     const proxyUrl = getProxyUrl(proxy);
     // Set geolocation
@@ -485,11 +555,11 @@ export async function launchOptions({ config, os, block_images, block_webrtc, bl
         console.debug(config);
     }
     // Validate the config
-    validateConfig(config, executable_path);
+    validateConfig(config, knownProperties);
     //Prepare environment variables to pass to Camoufox
     const env_vars = {
         ...getEnvVars(config, targetOS),
-        ...process.env,
+        ...env,
     };
     // Prepare the executable path
     if (executable_path) {
@@ -511,7 +581,7 @@ export async function launchOptions({ config, os, block_images, block_webrtc, bl
                 bypass: typeof proxy === "string" ? undefined : proxy?.bypass,
             }
             : undefined,
-        headless: headless,
+        headless: headlessBoolean,
         ...launch_options,
     };
     return out;

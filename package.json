@@ -1,7 +1,7 @@
 {
 	"name": "webai-2api",
-	"version": "3.7.0",
-	"description": "Web AI to OpenAI/Anthropic API via Camoufox — multi-adapter browser automation bridge",
+	"version": "3.8.0",
+	"description": "Web AI to OpenAI/Anthropic API via Camoufox browser automation — multi-adapter bridge",
 	"license": "MIT",
 	"author": "foxhui",
 	"type": "module",
@@ -9,7 +9,9 @@
 		"start": "node supervisor.js",
 		"genkey": "node scripts/genkey.js",
 		"init": "node scripts/init.js",
-		"postinstall": "node scripts/postinstall.js"
+		"postinstall": "node scripts/postinstall.js",
+		"test:camoufox-upgrade": "node scripts/test-camoufox-upgrade.mjs",
+		"test:api-upgrade": "node scripts/test-upgrade.mjs"
 	},
 	"imports": {
 		"#config": "./src/config/index.js",
@@ -20,13 +22,13 @@
 	"dependencies": {
 		"@inquirer/prompts": "^8.0.1",
 		"better-sqlite3": "^12.5.0",
-		"camoufox-js": "^0.8.3",
+		"camoufox-js": "^0.12.0",
 		"compressing": "^2.0.0",
-		"fingerprint-generator": "^2.1.78",
+		"fingerprint-generator": "^2.1.86",
 		"ghost-cursor-playwright-port": "^1.4.3",
 		"got-scraping": "^4.1.2",
 		"https-proxy-agent": "^7.0.6",
-		"playwright-core": "^1.57.0",
+		"playwright-core": "1.60.0",
 		"proxy-chain": "^2.6.0",
 		"sharp": "^0.34.5",
 		"socks-proxy-agent": "^8.0.5",

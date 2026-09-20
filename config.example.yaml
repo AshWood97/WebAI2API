@@ -171,8 +171,20 @@ browser:
   # 拟人鼠标轨迹模式
   # - false:  禁用拟人轨迹，使用 Playwright 原生点击（性能最好，但会被自动化检测）
   # - true:   使用项目优化的 ghost-cursor（更拟人化，如不会点击正中心，但性能稍差）
-  # - "camou": 使用 Camoufox 内置轨迹（性能与拟人化的平衡）
-  humanizeCursor: true
+  # - "camou": 使用 Camoufox 内置轨迹（推荐；FF152+ 已修复 juggler humanize）
+  humanizeCursor: "camou"
+
+  # 显式指定 Firefox 主版本 spoof（默认省略=跟随 npm run init 安装的 Camoufox）
+  # ffVersion: 152
+
+  # Camoufox 0.12 / FF152 能力开关
+  camoufox:
+    mainWorldEval: false
+    enableCache: false
+    disableInstantAnimations: false
+    humanizeMaxTime: 1.5
+    blockWebRtc: true
+    geoip: true
 
   # 站点隔离 (fission.autostart)
   # 开启保持 Firefox 默认开启状态
