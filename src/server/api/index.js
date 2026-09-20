@@ -146,11 +146,9 @@ export function createGlobalRouter(context) {
             }
         }
 
-        // /docs：与 API 同鉴权（便于带 token 调试），鉴权后返回自包含文档页
+        // /docs：与 /openapi.json 一致免鉴权（HTML 仅为只读目录；浏览器 href 无法带 Bearer）
+        // WebUI 管理面仍有登录；公网请用反代保护整个服务
         if (req.method === 'GET' && (pathname === '/docs' || pathname === '/docs/')) {
-            if (!checkAuth(req, res)) {
-                return;
-            }
             handleDocsPage(res);
             return;
         }

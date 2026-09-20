@@ -135,7 +135,9 @@ export function buildCamoufoxCapabilityOptions(browserConfig = {}, camoufoxVer =
         options.locale = camou.locale;
     }
 
-    // 企业代理 MITM / 自定义 CA
+    // certificates / certificatePaths：camoufox-js@0.12 的 launchOptions 未实现该能力
+    // （Python 版 Camoufox 才支持）。此处仅透传配置形状，避免误用时静默丢字段；
+    // Playwright 亦不消费，故实际不生效——见 CHANGELOG「预留」说明。
     if (Array.isArray(camou.certificates) && camou.certificates.length > 0) {
         options.certificates = camou.certificates;
     }

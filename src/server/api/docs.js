@@ -1,13 +1,16 @@
 /**
- * @fileoverview 自包含 API 文档页（借鉴 WebAI-to-API /docs）
- * @description 无外链 CDN，同源拉取 /openapi.json 渲染端点目录
- */
-
-/**
  * 构建 /docs HTML
  * @param {{title?: string, version?: string}} [options]
  * @returns {string}
  */
+function escapeHtml(s) {
+    return String(s ?? '')
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;');
+}
+
 export function buildDocsHtml(options = {}) {
     const title = options.title || 'WebAI2API API 文档';
     const version = options.version || '';
@@ -16,7 +19,7 @@ export function buildDocsHtml(options = {}) {
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>${title}</title>
+<title>${escapeHtml(title)}</title>
 <style>
   :root {
     --bg:#09090b; --surface:#111113; --border:#1f1f23; --ink:#e4e4e7;
@@ -49,8 +52,8 @@ export function buildDocsHtml(options = {}) {
 </head>
 <body>
 <div class="wrap">
-  <h1>${title}</h1>
-  <p class="meta">版本 <code id="ver">${version || '…'}</code> · OpenAPI: <code>/openapi.json</code> · 管理台: <code>/</code></p>
+  <h1>${escapeHtml(title)}</h1>
+  <p class="meta">版本 <code id="ver">${escapeHtml(version || '…')}</code> · OpenAPI: <code>/openapi.json</code> · 管理台: <code>/</code></p>
 
   <div class="card">
     <header>快速接入</header>
@@ -76,20 +79,24 @@ function copyVal(id) {
   if (!el) return;
   const text = el.value || el.textContent;
   (navigator.clipboard?.writeText(text) || Promise.reject()).then(
-    () => { el.dataset.ok='1'; },
+    () => {},
     () => { el.select?.(); document.execCommand?.('copy'); }
   );
 }
 function methodClass(m) { return String(m||'').toLowerCase() === 'get' ? 'method get' : 'method'; }
+function esc(s) {
+  return String(s ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
 
 const origin = location.origin;
-const token = localStorage.getItem('webai2api_token') || 'YOUR_API_KEY';
+// WebUI 使用 admin_token；兼容旧键
+const token = localStorage.getItem('admin_token') || localStorage.getItem('webai2api_token') || 'YOUR_API_KEY';
 document.getElementById('baseUrl').value = origin + '/v1';
 document.getElementById('curlVal').value =
   "curl -sS " + origin + "/v1/chat/completions -H 'Authorization: Bearer " + token +
   "' -H 'Content-Type: application/json' -d '{\\"model\\":\\"your-model\\",\\"messages\\":[{\\"role\\":\\"user\\",\\"content\\":\\"hi\\"}],\\"stream\\":true}'";
 
-fetch('/openapi.json', { headers: token && token !== 'YOUR_API_KEY' ? { Authorization: 'Bearer ' + token } : {} })
+fetch('/openapi.json')
   .then(r => r.json())
   .then(spec => {
     document.getElementById('ver').textContent = spec.info?.version || '';
@@ -98,11 +105,11 @@ fetch('/openapi.json', { headers: token && token !== 'YOUR_API_KEY' ? { Authoriz
     for (const [p, ops] of Object.entries(paths)) {
       for (const [method, op] of Object.entries(ops)) {
         if (!['get','post','delete','put','patch'].includes(method)) continue;
-        const tags = (op.tags || []).map(t => '<span class="tag">' + t + '</span>').join('');
+        const tags = (op.tags || []).map(t => '<span class="tag">' + esc(t) + '</span>').join('');
         rows.push(
-          '<tr><td><span class="' + methodClass(method) + '">' + method.toUpperCase() +
-          '</span></td><td class="path">' + p + '</td><td>' + tags +
-          '</td><td class="sum">' + (op.summary || op.description || '') + '</td></tr>'
+          '<tr><td><span class="' + methodClass(method) + '">' + esc(method.toUpperCase()) +
+          '</span></td><td class="path">' + esc(p) + '</td><td>' + tags +
+          '</td><td class="sum">' + esc(op.summary || op.description || '') + '</td></tr>'
         );
       }
     }
@@ -111,7 +118,7 @@ fetch('/openapi.json', { headers: token && token !== 'YOUR_API_KEY' ? { Authoriz
       rows.join('') + '</tbody></table>';
   })
   .catch(e => {
-    document.getElementById('out').innerHTML = '<div class="err">加载 OpenAPI 失败: ' + e.message + '</div>';
+    document.getElementById('out').innerHTML = '<div class="err">加载 OpenAPI 失败: ' + esc(e.message) + '</div>';
   });
 </script>
 </body>

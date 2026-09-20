@@ -108,7 +108,7 @@ export function createOpenAIRouter(context) {
                 memoryUsage: system.memoryUsage,
                 systemVersion: system.systemVersion
             },
-            camoufox: readCamoufoxVersion(PROJECT_CAMOUFOX_DIR),
+            camoufox: readCamoufoxVersion(process.env.CAMOUFOX_INSTALL_DIR || PROJECT_CAMOUFOX_DIR),
             keepaliveMode: config?.server?.keepalive?.mode || 'comment',
             timestamp: new Date().toISOString()
         });

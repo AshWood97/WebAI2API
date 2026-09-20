@@ -12,15 +12,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Camoufox 运维/配置补齐**
   - Dockerfile：`ENV CAMOUFOX_INSTALL_DIR=/app/camoufox`，复制 `pnpm-workspace.yaml`
   - `browser.camoufox.locale`：透传 Camoufox `locale`（FF152 起真正生效）
-  - `browser.camoufox.certificates` / `certificatePaths`：企业 MITM CA 信任
-  - `/v1/runtime/status` 增加 `camoufox: {version, release, major, full}`
-  - WebUI 浏览器设置：humanize 三态（默认 camou）、ffVersion、locale、CA 路径、mainWorldEval/enableCache/disableInstantAnimations/humanizeMaxTime/blockWebRtc/geoip
+  - `browser.camoufox.certificates` / `certificatePaths`：**配置预留**（camoufox-js@0.12 未实现消费，需上游 JS port 支持后再生效；请勿视为已可用的企业 CA 能力）
+  - `/v1/runtime/status` 增加 `camoufox: {version, release, major, full}`（优先读 `CAMOUFOX_INSTALL_DIR`）
+  - WebUI 浏览器设置：humanize 三态（默认 camou）、ffVersion、locale、CA 路径（预留）、mainWorldEval/enableCache/disableInstantAnimations/humanizeMaxTime/blockWebRtc/geoip
 
 - **文档与调试体验**（借鉴 WebAI-to-API / WebModel）
-  - `GET /docs`：自包含 HTML API 目录，同源读取 `/openapi.json`，无外链 CDN
+  - `GET /docs`：自包含 HTML API 目录，同源读取 `/openapi.json`，无外链 CDN；与 `/openapi.json` 同为只读目录，不额外 Bearer（浏览器 href 无法带 Authorization）
   - Dashboard：复制 Base URL / curl 示例、Camoufox 内核版本摘要
   - Dashboard：Provider 健康卡片（`/v1/providers`）
-  - WebUI 顶栏与接口测试抽屉：API 文档入口 + 一键复制接入命令
+  - WebUI 顶栏与接口测试抽屉：API 文档入口 + 一键复制接入命令；token 键 `admin_token`
 
 ### 🔄 Changed
 

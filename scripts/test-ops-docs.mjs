@@ -45,6 +45,16 @@ console.log('\n[2] /docs HTML');
     assert('contains version', html.includes('3.9.0'));
     assert('no external CDN script src', !/src=["']https?:\/\//.test(html));
     assert('has copy helpers', html.includes('copyVal') && html.includes('Base URL'));
+    assert('reads admin_token', html.includes("localStorage.getItem('admin_token')"));
+    assert('escapes HTML in client render', html.includes('function esc('));
+}
+
+console.log('\n[2b] certificates 仅为预留透传（JS port 未消费）');
+{
+    const opts = buildCamoufoxCapabilityOptions({
+        camoufox: { certificatePaths: ['/tmp/ca.pem'] }
+    }, null, {});
+    assert('still passes certificatePaths for future', opts.certificatePaths?.[0] === '/tmp/ca.pem');
 }
 
 console.log('\n[3] runtime camoufox 版本读取');

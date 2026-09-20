@@ -101,8 +101,9 @@ const handleSave = async () => {
             blockWebRtc: formData.camoufox.blockWebRtc,
             geoip: formData.camoufox.geoip,
             locale: formData.camoufox.locale || null,
-            certificatePaths,
-            certificates: []
+            certificatePaths
+            // 不发送 certificates：避免 WebUI 保存时清空 YAML 中的原始 PEM；
+            // 且 camoufox-js@0.12 尚未消费 certificates/certificatePaths（仅预留）
         },
         proxy: {
             enable: formData.proxyEnable,
@@ -202,7 +203,7 @@ const handleSave = async () => {
                         </a-form-item>
                     </a-col>
                 </a-row>
-                <a-form-item label="自定义 CA 证书路径（每行一个，企业 MITM 代理用）">
+                <a-form-item label="自定义 CA 证书路径（每行一个）· 预留：camoufox-js 0.12 暂未消费">
                     <a-textarea v-model:value="formData.camoufox.certificatePathsText" :rows="3"
                         placeholder="/etc/ssl/corp-ca.pem" />
                 </a-form-item>

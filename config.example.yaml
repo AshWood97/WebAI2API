@@ -187,10 +187,11 @@ browser:
     geoip: true
     # 语言区域（空/省略 = 跟指纹）。FF152 起 launch locale 真正生效
     # locale: "zh-CN"
-    # 企业 MITM 代理自定义 CA（文件路径，每项一个）
+    # 自定义 CA：配置预留。camoufox-js@0.12 launchOptions 未实现 certificates，
+    # 写入后不会生效，待上游 JS port 支持后再启用。
     # certificatePaths:
     #   - /etc/ssl/corp-ca.pem
-    # certificates: []   # 原始 PEM 内容数组（少用）
+    # certificates: []
 
 
   # 站点隔离 (fission.autostart)
