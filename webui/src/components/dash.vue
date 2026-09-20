@@ -2,6 +2,7 @@
 import { ref, onMounted, onUnmounted } from 'vue';
 import { useSystemStore } from '@/stores/system';
 import { useSettingsStore } from '@/stores/settings';
+import { message } from 'ant-design-vue';
 import {
     DesktopOutlined,
     PieChartOutlined,
@@ -11,17 +12,23 @@ import {
     SyncOutlined,
     ExclamationCircleOutlined,
     CheckCircleOutlined,
-    CloseCircleOutlined
+    CloseCircleOutlined,
+    ApiOutlined,
+    CopyOutlined,
+    BookOutlined
 } from '@ant-design/icons-vue';
 
 const systemStore = useSystemStore();
 const queueData = ref([]);
 const timer = ref(null);
 const queueStats = ref({ processing: 0, waiting: 0, total: 0 });
+const providers = ref([]);
+const runtimeInfo = ref(null);
+const baseUrl = ref('');
 
-// 获取队列数据
-const fetchQueue = async () => {
+const refreshData = async () => {
     const settingsStore = useSettingsStore(); // 获取store
+    baseUrl.value = `${location.origin}/v1`;
     try {
         const res = await fetch('/admin/queue', { headers: settingsStore.getHeaders() });
         if (res.ok) {
@@ -41,14 +48,51 @@ const fetchQueue = async () => {
     } catch (e) {
         console.error('Fetch queue failed', e);
     }
-};
 
-const refreshData = async () => {
+    // Provider 健康卡片（借鉴 WebModel）
+    try {
+        const settingsStore = useSettingsStore();
+        const res = await fetch('/v1/providers', { headers: settingsStore.getHeaders() });
+        if (res.ok) {
+            const data = await res.json();
+            providers.value = data.data || [];
+        }
+    } catch (e) { /* providers optional */ }
+
+    try {
+        const settingsStore = useSettingsStore();
+        const res = await fetch('/v1/runtime/status', { headers: settingsStore.getHeaders() });
+        if (res.ok) {
+            runtimeInfo.value = await res.json();
+        }
+    } catch (e) { /* runtime optional */ }
+
     await Promise.all([
         systemStore.fetchStatus(),
-        systemStore.fetchStats(),
-        fetchQueue()
+        systemStore.fetchStats()
     ]);
+};
+
+const copyText = async (text, tip = '已复制') => {
+    try {
+        await navigator.clipboard.writeText(text);
+        message.success(tip);
+    } catch {
+        message.error('复制失败');
+    }
+};
+
+const copyBaseUrl = () => copyText(baseUrl.value, 'Base URL 已复制');
+const copySampleCurl = () => {
+    const token = useSettingsStore().token || 'YOUR_API_KEY';
+    const curl = `curl -sS ${baseUrl.value}/chat/completions -H 'Authorization: Bearer ${token}' -H 'Content-Type: application/json' -d '{"model":"your-model","messages":[{"role":"user","content":"hi"}],"stream":true}'`;
+    copyText(curl, 'curl 示例已复制');
+};
+
+const providerStatusColor = (status) => {
+    if (status === 'active') return 'green';
+    if (status === 'registered') return 'blue';
+    return 'default';
 };
 
 const formatUptime = (seconds) => {
@@ -225,6 +269,51 @@ onUnmounted(() => {
                 </a-card>
             </a-col>
         </a-row>
+
+        <!-- 接入与文档 -->
+        <a-card title="API 接入" :bordered="false" style="margin-bottom: 16px">
+            <a-space direction="vertical" style="width: 100%" size="small">
+                <div style="display: flex; flex-wrap: wrap; gap: 8px; align-items: center;">
+                    <a-input :value="baseUrl" readonly style="max-width: 420px; font-family: monospace;" />
+                    <a-button size="small" @click="copyBaseUrl">
+                        <CopyOutlined /> 复制 Base URL
+                    </a-button>
+                    <a-button size="small" @click="copySampleCurl">
+                        <CopyOutlined /> 复制 curl
+                    </a-button>
+                    <a-button size="small" type="link" href="/docs" target="_blank">
+                        <BookOutlined /> API 文档
+                    </a-button>
+                </div>
+                <div v-if="runtimeInfo?.camoufox" style="font-size: 12px; color: #8c8c8c;">
+                    Camoufox 内核：{{ runtimeInfo.camoufox.full || runtimeInfo.camoufox.version }}
+                    · 状态 {{ runtimeInfo.status }} · 模型 {{ runtimeInfo.models?.count ?? 0 }}
+                </div>
+            </a-space>
+        </a-card>
+
+        <!-- Provider 健康卡片 -->
+        <a-card v-if="providers.length" title="Provider 状态" :bordered="false" style="margin-bottom: 16px">
+            <a-row :gutter="[12, 12]">
+                <a-col v-for="p in providers" :key="p.id" :xs="24" :sm="12" :md="8" :lg="6">
+                    <div style="padding: 12px; box-shadow: 0 0 0 1px #f0f0f0; border-radius: 8px;">
+                        <div style="display: flex; justify-content: space-between; align-items: center;">
+                            <b><ApiOutlined /> {{ p.name || p.id }}</b>
+                            <a-tag :color="providerStatusColor(p.status)">{{ p.status }}</a-tag>
+                        </div>
+                        <div style="margin-top: 8px; font-size: 12px; color: #8c8c8c;">
+                            模型 {{ p.modelCount || 0 }} · 文本 {{ p.textCount || 0 }} · 图像 {{ p.imageCount || 0 }}
+                        </div>
+                        <div style="margin-top: 4px; font-size: 12px; color: #8c8c8c;">
+                            Worker {{ p.runningWorkers || 0 }}
+                            <span v-for="w in (p.workers || []).slice(0, 3)" :key="w.name">
+                                · {{ w.name }}{{ w.busy ? '(忙)' : '' }}
+                            </span>
+                        </div>
+                    </div>
+                </a-col>
+            </a-row>
+        </a-card>
 
         <!-- 任务队列列表 -->
         <a-card title="任务队列实时监控" :bordered="false" style="width: 100%" :bodyStyle="{ padding: '0 24px' }">

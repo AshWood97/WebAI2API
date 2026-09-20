@@ -130,6 +130,19 @@ export function buildCamoufoxCapabilityOptions(browserConfig = {}, camoufoxVer =
         options.enable_cache = true;
     }
 
+    // locale：FF152 起 launch 参数真正生效；省略则跟指纹
+    if (camou.locale !== undefined && camou.locale !== null && camou.locale !== '') {
+        options.locale = camou.locale;
+    }
+
+    // 企业代理 MITM / 自定义 CA
+    if (Array.isArray(camou.certificates) && camou.certificates.length > 0) {
+        options.certificates = camou.certificates;
+    }
+    if (Array.isArray(camou.certificatePaths) && camou.certificatePaths.length > 0) {
+        options.certificatePaths = camou.certificatePaths;
+    }
+
     // WebRTC：默认阻断；geoip 仍用于地理位置一致性（152 修复代理 IP 泄漏）
     options.block_webrtc = camou.blockWebRtc !== false;
     options.geoip = camou.geoip !== false;

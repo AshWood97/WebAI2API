@@ -16,6 +16,7 @@ import { createAuthMiddleware } from '../middlewares/auth.js';
 import { sendJson } from '../respond.js';
 import { getSystemStatus } from '../../utils/systemInfo.js';
 import { buildOpenApiSchema } from './openai/openapi.js';
+import { buildDocsHtml } from './docs.js';
 
 // MIME 类型映射
 const MIME_TYPES = {
@@ -110,6 +111,19 @@ export function createGlobalRouter(context) {
     }
 
     /**
+     * OpenAPI 文档页（与 API 同鉴权；有 token 时先过 checkAuth）
+     * 借鉴 WebAI-to-API /docs
+     */
+    function handleDocsPage(res) {
+        const html = buildDocsHtml({
+            title: 'WebAI2API API 文档',
+            version: cachedVersion
+        });
+        res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
+        res.end(html);
+    }
+
+    /**
      * 主路由处理函数
      */
     return async function handleRequest(req, res) {
@@ -130,6 +144,15 @@ export function createGlobalRouter(context) {
                 handleOpenApiRoot(res);
                 return;
             }
+        }
+
+        // /docs：与 API 同鉴权（便于带 token 调试），鉴权后返回自包含文档页
+        if (req.method === 'GET' && (pathname === '/docs' || pathname === '/docs/')) {
+            if (!checkAuth(req, res)) {
+                return;
+            }
+            handleDocsPage(res);
+            return;
         }
 
         // ==================== 静态文件服务 ====================

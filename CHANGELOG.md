@@ -5,6 +5,28 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.9.0] - 2026-09-20
+
+### ✨ Added
+
+- **Camoufox 运维/配置补齐**
+  - Dockerfile：`ENV CAMOUFOX_INSTALL_DIR=/app/camoufox`，复制 `pnpm-workspace.yaml`
+  - `browser.camoufox.locale`：透传 Camoufox `locale`（FF152 起真正生效）
+  - `browser.camoufox.certificates` / `certificatePaths`：企业 MITM CA 信任
+  - `/v1/runtime/status` 增加 `camoufox: {version, release, major, full}`
+  - WebUI 浏览器设置：humanize 三态（默认 camou）、ffVersion、locale、CA 路径、mainWorldEval/enableCache/disableInstantAnimations/humanizeMaxTime/blockWebRtc/geoip
+
+- **文档与调试体验**（借鉴 WebAI-to-API / WebModel）
+  - `GET /docs`：自包含 HTML API 目录，同源读取 `/openapi.json`，无外链 CDN
+  - Dashboard：复制 Base URL / curl 示例、Camoufox 内核版本摘要
+  - Dashboard：Provider 健康卡片（`/v1/providers`）
+  - WebUI 顶栏与接口测试抽屉：API 文档入口 + 一键复制接入命令
+
+### 🔄 Changed
+
+- 版本号 **3.9.0**
+- `saveBrowserConfig` 持久化 locale / certificatePaths / ffVersion / camoufox 子配置
+
 ## [3.8.0] - 2026-09-18
 
 ### 🔄 Changed — Camoufox 基座升级（FF135 → FF152）

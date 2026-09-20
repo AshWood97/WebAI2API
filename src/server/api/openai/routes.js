@@ -17,6 +17,8 @@ import { parseRequest } from './parse.js';
 import { buildOpenApiSchema } from './openapi.js';
 import { getSystemStatus } from '../../../utils/systemInfo.js';
 import { getTodayStats } from '../../../utils/stats.js';
+import { readCamoufoxVersion } from '../../../backend/engine/camoufoxMeta.js';
+import { PROJECT_CAMOUFOX_DIR } from '../../../backend/engine/camoufoxEnv.js';
 
 /**
  * 创建 OpenAI API 路由处理器
@@ -106,6 +108,7 @@ export function createOpenAIRouter(context) {
                 memoryUsage: system.memoryUsage,
                 systemVersion: system.systemVersion
             },
+            camoufox: readCamoufoxVersion(PROJECT_CAMOUFOX_DIR),
             keepaliveMode: config?.server?.keepalive?.mode || 'comment',
             timestamp: new Date().toISOString()
         });

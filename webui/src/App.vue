@@ -23,6 +23,7 @@ import LoginModal from '@/components/auth/LoginModal.vue';
 
 const router = useRouter();
 const settingsStore = useSettingsStore();
+const apiBaseUrl = `${location.origin}/v1`;
 
 const selectedKeys = ref(['dash']);
 const collapsed = ref(false);
@@ -67,6 +68,23 @@ const fetchModelList = async () => {
   } catch (e) {
     console.error('获取模型列表失败', e);
   }
+};
+
+const copyApiBaseUrl = async () => {
+  try {
+    await navigator.clipboard.writeText(apiBaseUrl);
+    message.success('Base URL 已复制');
+  } catch { message.error('复制失败'); }
+};
+
+const copyApiCurl = async () => {
+  const token = settingsStore.token || 'YOUR_API_KEY';
+  const model = chatTestModel.value || 'your-model';
+  const curl = `curl -sS ${apiBaseUrl}/chat/completions -H 'Authorization: Bearer ${token}' -H 'Content-Type: application/json' -d '{"model":"${model}","messages":[{"role":"user","content":"hi"}],"stream":true}'`;
+  try {
+    await navigator.clipboard.writeText(curl);
+    message.success('curl 已复制');
+  } catch { message.error('复制失败'); }
 };
 
 // 图片转 base64
@@ -406,6 +424,12 @@ onMounted(async () => {
           WebAI2API
         </div>
         <a-flex justify="end" align="center" style="flex: 1;" :gap="8">
+          <a-button href="/docs" target="_blank" :size="isMobile ? 'small' : 'middle'">
+            <template #icon>
+              <ApiOutlined />
+            </template>
+            <span v-if="!isMobile">API 文档</span>
+          </a-button>
           <a-button @click="openApiTestDrawer" :size="isMobile ? 'small' : 'middle'">
             <template #icon>
               <ApiOutlined />
@@ -482,6 +506,16 @@ onMounted(async () => {
     <!-- 接口测试抽屉 -->
     <a-drawer v-model:open="apiTestDrawer" title="接口测试" placement="right" :width="isMobile ? '100%' : 500">
       <a-space direction="vertical" style="width: 100%" size="large">
+        <a-card size="small" title="快速接入">
+          <a-space direction="vertical" style="width: 100%">
+            <a-input :value="apiBaseUrl" readonly style="font-family: monospace;" />
+            <a-space>
+              <a-button size="small" @click="copyApiBaseUrl">复制 Base URL</a-button>
+              <a-button size="small" @click="copyApiCurl">复制 curl</a-button>
+              <a-button size="small" type="link" href="/docs" target="_blank">打开 /docs</a-button>
+            </a-space>
+          </a-space>
+        </a-card>
         <!-- Models 接口 -->
         <a-card title="GET /v1/models" size="small">
           <template #extra>

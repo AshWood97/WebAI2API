@@ -95,7 +95,10 @@ export function getBrowserConfig() {
             disableInstantAnimations: browser.camoufox?.disableInstantAnimations ?? false,
             humanizeMaxTime: browser.camoufox?.humanizeMaxTime ?? 1.5,
             blockWebRtc: browser.camoufox?.blockWebRtc !== false,
-            geoip: browser.camoufox?.geoip !== false
+            geoip: browser.camoufox?.geoip !== false,
+            locale: browser.camoufox?.locale ?? null,
+            certificates: browser.camoufox?.certificates ?? [],
+            certificatePaths: browser.camoufox?.certificatePaths ?? []
         },
         cssInject: {
             animation: cssInject.animation || false,
@@ -137,6 +140,9 @@ export function saveBrowserConfig(data) {
         if (c.humanizeMaxTime !== undefined) config.browser.camoufox.humanizeMaxTime = c.humanizeMaxTime;
         if (c.blockWebRtc !== undefined) config.browser.camoufox.blockWebRtc = c.blockWebRtc;
         if (c.geoip !== undefined) config.browser.camoufox.geoip = c.geoip;
+        if (c.locale !== undefined) config.browser.camoufox.locale = c.locale;
+        if (c.certificates !== undefined) config.browser.camoufox.certificates = c.certificates;
+        if (c.certificatePaths !== undefined) config.browser.camoufox.certificatePaths = c.certificatePaths;
     }
 
     // CSS 性能优化配置

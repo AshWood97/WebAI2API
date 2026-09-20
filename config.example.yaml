@@ -185,6 +185,13 @@ browser:
     humanizeMaxTime: 1.5
     blockWebRtc: true
     geoip: true
+    # 语言区域（空/省略 = 跟指纹）。FF152 起 launch locale 真正生效
+    # locale: "zh-CN"
+    # 企业 MITM 代理自定义 CA（文件路径，每项一个）
+    # certificatePaths:
+    #   - /etc/ssl/corp-ca.pem
+    # certificates: []   # 原始 PEM 内容数组（少用）
+
 
   # 站点隔离 (fission.autostart)
   # 开启保持 Firefox 默认开启状态

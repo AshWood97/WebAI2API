@@ -356,6 +356,9 @@ export async function initBrowserBase(config, options = {}) {
         ...(capability.main_world_eval !== undefined ? { main_world_eval: capability.main_world_eval } : {}),
         ...(capability.enable_cache !== undefined ? { enable_cache: capability.enable_cache } : {}),
         ...(capability.window ? { window: capability.window } : {}),
+        ...(capability.locale !== undefined ? { locale: capability.locale } : {}),
+        ...(capability.certificates !== undefined ? { certificates: capability.certificates } : {}),
+        ...(capability.certificatePaths !== undefined ? { certificatePaths: capability.certificatePaths } : {}),
         block_webrtc: capability.block_webrtc !== false,
         geoip: capability.geoip !== false
     };

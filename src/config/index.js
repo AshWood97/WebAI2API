@@ -266,6 +266,9 @@ export function loadConfig() {
     if (camouCfg.humanizeMaxTime === undefined) camouCfg.humanizeMaxTime = 1.5;
     if (camouCfg.blockWebRtc === undefined) camouCfg.blockWebRtc = true;
     if (camouCfg.geoip === undefined) camouCfg.geoip = true;
+    if (camouCfg.locale === undefined) camouCfg.locale = null;
+    if (!Array.isArray(camouCfg.certificates)) camouCfg.certificates = [];
+    if (!Array.isArray(camouCfg.certificatePaths)) camouCfg.certificatePaths = [];
 
     // 设置 Pool 配置默认值
     if (!config.backend) config.backend = {};

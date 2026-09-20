@@ -73,6 +73,14 @@ export function buildOpenApiSchema(options = {}) {
                     responses: { '200': { description: 'OpenAPI 3.0 document' } }
                 }
             },
+            '/docs': {
+                get: {
+                    tags: ['System'],
+                    summary: 'Human-readable API catalog page',
+                    description: 'Self-contained HTML that loads /openapi.json. Requires Bearer auth when server.auth is set.',
+                    responses: { '200': { description: 'HTML documentation page' } }
+                }
+            },
             '/v1/models': {
                 get: {
                     tags: ['OpenAI'],
