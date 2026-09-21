@@ -5,6 +5,29 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.10.0] - 2026-09-21
+
+### ✨ Added — 双浏览器基座：Camoufox + Clearcote
+
+- **`browser.engine`**：`camoufox`（默认）| `clearcote`；**`backend.pool.instances[].engine`** 可单实例覆盖，同一服务可同时启用两种基座
+- **Clearcote 接入**：npm `clearcote@0.30.0`（精确 pin），官方 `launchPersistentContext()` + Playwright drop-in；lazy-import，不改动适配器协议与 API 模型 ID
+- **Profile 隔离**：Camoufox 仍用 `data/camoufoxUserData*`；Clearcote 使用 `data/clearcoteUserData*`；Pool 共享键为 `engine + userDataDir`
+- **Clearcote seed**：profile 目录 `.webai2api-clearcote.json` 持久高熵 seed（禁止用 instance 名当身份）
+- **代理**：Clearcote 使用标准 Playwright `{server,username,password}`；SOCKS5 **带认证** 走 proxy-chain 本地 relay，不静默丢密码
+- **预检**：只检查配置引用到的引擎；仅 Clearcote 时不要求 Camoufox 二进制/GeoLite
+- **平台门禁**：Clearcote 官方支持 Windows x64 / Linux x64；**macOS 选 Clearcote 会明确报错**，不会 fallback 成普通 Chromium 仍报告 clearcote
+- **运行时**：`/v1/runtime/status` 保留 `camoufox` 字段，新增 `browser.defaultEngine/engines/workers`（路径脱敏、不含代理密码）
+- **WebUI**：全局 engine + Clearcote 专属字段；实例编辑「继承 / Camoufox / Clearcote」；Dashboard 显示实际引擎
+- **Docker**：补齐 Clearcote 所需 `xz-utils` 与 Chromium 运行库；`--no-sandbox` 仅能通过 `browser.clearcote.args` 显式配置
+- **测试**：`pnpm test:browser-engines`（`scripts/test-browser-engines.mjs`）
+
+### ⚠️ Notes
+
+- 切换引擎**重启后生效**，不做运行中热切换
+- Clearcote 免费 GitHub 构建默认同时仅 **1** 个浏览器（官方免费档）；多 Clearcote 并发属上游限制
+- Clearcote 是开源/可验证路线（SHA-256 校验），**不保证绕过任何网站风控**；不引入 PRO 许可证
+- macOS 本机继续使用 Camoufox；Clearcote 启动冒烟在 macOS 上标记 **UNVERIFIED**
+
 ## [3.9.0] - 2026-09-20
 
 ### ✨ Added

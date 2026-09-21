@@ -84,6 +84,41 @@ export function validateBrowserConfig(data) {
         errors.push('path 必须是字符串');
     }
 
+    // Engine 校验
+    if (data.engine !== undefined && data.engine !== null && data.engine !== '') {
+        if (typeof data.engine !== 'string' || !['camoufox', 'clearcote'].includes(data.engine.toLowerCase())) {
+            errors.push('engine 必须是 camoufox 或 clearcote');
+        }
+    }
+
+    // Clearcote 字段校验
+    if (data.clearcote) {
+        const cc = data.clearcote;
+        if (cc.path !== undefined && typeof cc.path !== 'string') {
+            errors.push('clearcote.path 必须是字符串');
+        }
+        if (cc.platform !== undefined && !['auto', 'windows', 'linux'].includes(String(cc.platform).toLowerCase())) {
+            errors.push('clearcote.platform 必须是 auto、windows 或 linux');
+        }
+        if (cc.brand !== undefined && !['Chrome', 'Edge', 'Opera', 'Vivaldi'].includes(cc.brand)) {
+            errors.push('clearcote.brand 必须是 Chrome、Edge、Opera 或 Vivaldi');
+        }
+        if (cc.geoip !== undefined && typeof cc.geoip !== 'boolean') {
+            errors.push('clearcote.geoip 必须是布尔值');
+        }
+        if (cc.humanize !== undefined && typeof cc.humanize !== 'boolean') {
+            errors.push('clearcote.humanize 必须是布尔值');
+        }
+        if (cc.args !== undefined && !Array.isArray(cc.args)) {
+            errors.push('clearcote.args 必须是数组');
+        }
+        for (const forbidden of ['ffVersion', 'camoufox', 'firefox_user_prefs', 'webgl_config']) {
+            if (forbidden in cc) {
+                errors.push(`clearcote 不允许 Firefox/Camoufox 专属字段: ${forbidden}`);
+            }
+        }
+    }
+
     // Headless 校验
     if (data.headless !== undefined && typeof data.headless !== 'boolean') {
         errors.push('headless 必须是布尔值');
@@ -150,6 +185,13 @@ export function validateInstancesConfig(data) {
             errors.push(`${prefix}: Instance 名称 "${inst.name}" 重复`);
         } else {
             instanceNames.add(inst.name);
+        }
+
+        // Instance engine 校验
+        if (inst.engine !== undefined && inst.engine !== null && inst.engine !== '') {
+            if (typeof inst.engine !== 'string' || !['camoufox', 'clearcote'].includes(String(inst.engine).toLowerCase())) {
+                errors.push(`${prefix}: engine 必须是 camoufox 或 clearcote（或省略以继承 browser.engine）`);
+            }
         }
 
         // userDataMark 校验（可选，可为空）

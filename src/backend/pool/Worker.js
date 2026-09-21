@@ -5,7 +5,8 @@
 
 import fs from 'fs';
 import { logger } from '../../utils/logger.js';
-import { initBrowserBase, createCursor } from '../engine/launcher.js';
+import { initBrowserBase, createCursor, shouldUseGhostCursor } from '../engine/launcher.js';
+import { normalizeEngine } from '../engine/engineContract.js';
 import { registry } from '../registry.js';
 import { tryGotoWithCheck } from '../utils/page.js';
 
@@ -21,6 +22,7 @@ export class Worker {
         this.name = workerConfig.name;
         this.type = workerConfig.type;
         this.instanceName = workerConfig.instanceName || null;
+        this.engine = normalizeEngine(workerConfig.engine || globalConfig?.browser?.engine);
         this.userDataDir = workerConfig.userDataDir;
         this.proxyConfig = workerConfig.resolvedProxy;
         this.globalConfig = globalConfig;
@@ -119,8 +121,8 @@ export class Worker {
         this.page._browserMutex = this._browserMutex;
         const humanizeCursorMode = this.globalConfig?.browser?.humanizeCursor;
         this.page._humanizeCursorMode = humanizeCursorMode;
-        // true 表示使用项目维护的 ghost-cursor
-        if (humanizeCursorMode === true) {
+        // true 表示使用项目维护的 ghost-cursor（Clearcote 原生 humanize 开启时不叠加）
+        if (shouldUseGhostCursor(this.engine, this.globalConfig)) {
             this.page.cursor = createCursor(this.page);
         }
 
@@ -173,7 +175,7 @@ export class Worker {
         this.page.authState = { isHandlingAuth: false };
         const humanizeCursorMode = this.globalConfig?.browser?.humanizeCursor;
         this.page._humanizeCursorMode = humanizeCursorMode;
-        if (humanizeCursorMode === true) {
+        if (shouldUseGhostCursor(this.engine, this.globalConfig)) {
             this.page.cursor = createCursor(this.page);
         }
         await this._navigateToTarget(this._targetUrl || 'about:blank');
@@ -199,15 +201,18 @@ export class Worker {
         const base = await initBrowserBase(this.globalConfig, {
             userDataDir: this.userDataDir,
             instanceName: this.instanceName,
+            engine: this.engine,
             proxyConfig: this.proxyConfig
         });
 
         this.browser = base.context;
         this.page = base.page;
+        this.engine = base.engine || this.engine;
+        this.runtime = base.runtime || null;
         this.page.authState = { isHandlingAuth: false };
         const humanizeCursorMode = this.globalConfig?.browser?.humanizeCursor;
         this.page._humanizeCursorMode = humanizeCursorMode;
-        if (humanizeCursorMode === true) {
+        if (shouldUseGhostCursor(this.engine, this.globalConfig)) {
             this.page.cursor = createCursor(this.page);
         }
 
@@ -260,7 +265,7 @@ export class Worker {
                             sharedWorker.page.authState = { isHandlingAuth: false };
                             const sharedCursorMode = this.globalConfig?.browser?.humanizeCursor;
                             sharedWorker.page._humanizeCursorMode = sharedCursorMode;
-                            if (sharedCursorMode === true) {
+                            if (shouldUseGhostCursor(sharedWorker.engine || this.engine, sharedWorker.globalConfig || this.globalConfig)) {
                                 sharedWorker.page.cursor = createCursor(sharedWorker.page);
                             }
                             await sharedWorker._navigateToTarget(sharedWorker._targetUrl || 'about:blank');

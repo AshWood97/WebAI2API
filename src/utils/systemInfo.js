@@ -7,6 +7,7 @@ import os from 'os';
 import fs from 'fs';
 import path from 'path';
 import { logger } from './logger.js';
+import { isManagedUserDataFolder } from '../backend/engine/engineContract.js';
 
 // 服务启动时间
 const startTime = Date.now();
@@ -109,7 +110,7 @@ export function getDataFolders(workers = []) {
     }
 
     for (const entry of entries) {
-        if (entry.isDirectory() && entry.name.startsWith('camoufoxUserData')) {
+        if (entry.isDirectory() && isManagedUserDataFolder(entry.name)) {
             const folderPath = path.join(dataDir, entry.name);
             let size = 0;
 
@@ -118,11 +119,13 @@ export function getDataFolders(workers = []) {
                 size = getFolderSize(folderPath, 3);
             } catch (e) { /* ignore */ }
 
+            const engine = entry.name.startsWith('clearcoteUserData') ? 'clearcote' : 'camoufox';
             folders.push({
                 name: entry.name,
                 path: `data/${entry.name}`,
                 size: formatSize(size),
                 sizeBytes: size,
+                engine,
                 instance: workerMap.get(entry.name) || null
             });
         }
@@ -151,8 +154,8 @@ export function deleteDataFolders(folderNames, workers = []) {
     }
 
     for (const name of folderNames) {
-        // 安全检查：只允许删除 camoufoxUserData 开头的文件夹
-        if (!name.startsWith('camoufoxUserData')) {
+        // 安全检查：只允许 camoufoxUserData* / clearcoteUserData*
+        if (!isManagedUserDataFolder(name)) {
             errors.push(`${name}: 不允许删除非用户数据文件夹`);
             continue;
         }

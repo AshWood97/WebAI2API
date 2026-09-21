@@ -1,6 +1,6 @@
 {
 	"name": "webai-2api",
-	"version": "3.9.0",
+	"version": "3.10.0",
 	"description": "Web AI to OpenAI/Anthropic API via Camoufox browser automation — multi-adapter bridge",
 	"license": "MIT",
 	"author": "foxhui",
@@ -12,7 +12,8 @@
 		"postinstall": "node scripts/postinstall.js",
 		"test:camoufox-upgrade": "node scripts/test-camoufox-upgrade.mjs",
 		"test:api-upgrade": "node scripts/test-upgrade.mjs",
-		"test:ops-docs": "node scripts/test-ops-docs.mjs"
+		"test:ops-docs": "node scripts/test-ops-docs.mjs",
+		"test:browser-engines": "node scripts/test-browser-engines.mjs"
 	},
 	"imports": {
 		"#config": "./src/config/index.js",
@@ -24,6 +25,7 @@
 		"@inquirer/prompts": "^8.0.1",
 		"better-sqlite3": "^12.5.0",
 		"camoufox-js": "^0.12.0",
+		"clearcote": "0.30.0",
 		"compressing": "^2.0.0",
 		"fingerprint-generator": "^2.1.86",
 		"ghost-cursor-playwright-port": "^1.4.3",

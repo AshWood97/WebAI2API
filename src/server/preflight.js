@@ -1,6 +1,6 @@
 /**
  * @fileoverview 服务器启动前自检模块
- * @description 检查补丁、Camoufox 可执行文件、version.json、GeoLite2 数据库和 better-sqlite3 是否就绪。
+ * @description 按配置实际引用的浏览器引擎检查 Camoufox / Clearcote 依赖。
  */
 
 import fs from 'fs';
@@ -12,6 +12,8 @@ import { logger } from '../utils/logger.js';
 import { CAMOUFOX_PATCHES } from '../../scripts/postinstall.js';
 import { readCamoufoxVersion } from '../backend/engine/camoufoxMeta.js';
 import { CAMOUFOX_MIN_RECOMMENDED_MAJOR } from '../../scripts/camoufoxRelease.js';
+import { collectReferencedEngines } from '../backend/engine/engineContract.js';
+import { preflightClearcote } from '../backend/engine/clearcoteMeta.js';
 
 const PROJECT_ROOT = process.cwd();
 
@@ -45,19 +47,17 @@ function getCamoufoxExecutablePath() {
 }
 
 /**
- * 执行服务器启动前自检
- * @returns {{ ok: boolean, errors: string[] }}
+ * Camoufox 依赖检查（仅在配置引用 camoufox 时执行）
+ * @param {string[]} errors
  */
-export function preflight() {
-    const errors = [];
-
+function checkCamoufoxDeps(errors) {
     // 1. 检查 better-sqlite3 预编译文件
     const sqlitePath = path.join(PROJECT_ROOT, 'node_modules', 'better-sqlite3', 'build', 'Release', 'better_sqlite3.node');
     if (!fs.existsSync(sqlitePath)) {
         errors.push('better-sqlite3 预编译文件缺失，请运行: npm run init');
     }
 
-    // 2. 检查 camoufox-js 补丁（通过 MD5 对比，使用 postinstall.js 导出的补丁列表）
+    // 2. 检查 camoufox-js 补丁
     const patchDir = path.join(PROJECT_ROOT, 'patches');
     const targetDir = path.join(PROJECT_ROOT, 'node_modules', 'camoufox-js', 'dist');
 
@@ -69,13 +69,12 @@ export function preflight() {
         const targetHash = getFileMD5(targetPath);
 
         if (!patchHash) {
-            // 补丁源文件不存在，跳过检查
             continue;
         }
 
         if (patchHash !== targetHash) {
             errors.push('camoufox-js 补丁未应用，请运行: pnpm install');
-            break; // 只报告一次
+            break;
         }
     }
 
@@ -105,6 +104,61 @@ export function preflight() {
     if (!fs.existsSync(geoDbPath)) {
         errors.push('camoufox/GeoLite2-City.mmdb 缺失，请运行: npm run init');
     }
+}
+
+/**
+ * 执行服务器启动前自检
+ * @param {object|null} [config] - 可选全局配置；未传时尝试 loadConfig
+ * @returns {{ ok: boolean, errors: string[] }}
+ */
+export async function preflight(config = null) {
+    const errors = [];
+
+    let cfg = config;
+    if (!cfg) {
+        try {
+            const { loadConfig } = await import('../config/index.js');
+            cfg = loadConfig();
+        } catch (e) {
+            logger.warn('服务器', `预检无法加载配置，将按默认引擎 camoufox 检查: ${e.message}`);
+            cfg = { browser: { engine: 'camoufox' } };
+        }
+    }
+
+    let engines;
+    try {
+        engines = collectReferencedEngines(cfg);
+    } catch (e) {
+        errors.push(e.message);
+        return { ok: false, errors };
+    }
+
+    const needCamoufox = engines.has('camoufox');
+    const needClearcote = engines.has('clearcote');
+    logger.info('服务器', `预检引擎集合: ${[...engines].join(', ') || 'camoufox'}`);
+
+    // better-sqlite3 始终需要（历史数据/统计）
+    const sqlitePath = path.join(PROJECT_ROOT, 'node_modules', 'better-sqlite3', 'build', 'Release', 'better_sqlite3.node');
+    if (!fs.existsSync(sqlitePath)) {
+        errors.push('better-sqlite3 预编译文件缺失，请运行: npm run init');
+    }
+
+    if (needCamoufox) {
+        // 补丁/可执行文件/version/GeoLite（不含重复的 sqlite）
+        const camouErrors = [];
+        checkCamoufoxDeps(camouErrors);
+        for (const err of camouErrors) {
+            if (!err.includes('better-sqlite3')) errors.push(err);
+        }
+    }
+
+    if (needClearcote) {
+        const clearcoteErrors = preflightClearcote(cfg?.browser?.clearcote || {}, os.platform());
+        errors.push(...clearcoteErrors);
+        if (!needCamoufox) {
+            logger.info('服务器', '配置仅引用 Clearcote，跳过 Camoufox 可执行文件/GeoLite 检查');
+        }
+    }
 
     return {
         ok: errors.length === 0,
@@ -115,10 +169,10 @@ export function preflight() {
 /**
  * 执行自检并在失败时退出程序
  */
-export function runPreflight() {
+export async function runPreflight() {
     logger.info('服务器', '正在执行自检...');
 
-    const result = preflight();
+    const result = await preflight();
 
     if (!result.ok) {
         logger.error('服务器', '自检失败，以下依赖缺失:');

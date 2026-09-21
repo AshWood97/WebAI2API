@@ -287,6 +287,17 @@ onUnmounted(() => {
                 </div>
                 <div v-if="runtimeInfo?.camoufox" style="font-size: 12px; color: #8c8c8c;">
                     Camoufox 内核：{{ runtimeInfo.camoufox.full || runtimeInfo.camoufox.version }}
+                    · 引擎 {{ runtimeInfo.browser?.defaultEngine || 'camoufox' }}
+                    <template v-if="runtimeInfo.browser?.engines?.length">
+                        （配置: {{ runtimeInfo.browser.engines.join(' + ') }}）
+                    </template>
+                    · 状态 {{ runtimeInfo.status }} · 模型 {{ runtimeInfo.models?.count ?? 0 }}
+                </div>
+                <div v-else-if="runtimeInfo?.browser" style="font-size: 12px; color: #8c8c8c;">
+                    引擎 {{ runtimeInfo.browser.defaultEngine }}
+                    <template v-if="runtimeInfo.browser?.engines?.length">
+                        （配置: {{ runtimeInfo.browser.engines.join(' + ') }}）
+                    </template>
                     · 状态 {{ runtimeInfo.status }} · 模型 {{ runtimeInfo.models?.count ?? 0 }}
                 </div>
             </a-space>

@@ -85,6 +85,7 @@ export function getBrowserConfig() {
 
     return {
         path: browser.path || '',
+        engine: browser.engine || 'camoufox',
         headless: browser.headless || false,
         fission: browser.fission !== false, // 默认 true
         humanizeCursor: browser.humanizeCursor ?? 'camou', // false | true | 'camou'
@@ -99,6 +100,18 @@ export function getBrowserConfig() {
             locale: browser.camoufox?.locale ?? null,
             certificates: browser.camoufox?.certificates ?? [],
             certificatePaths: browser.camoufox?.certificatePaths ?? []
+        },
+        clearcote: {
+            path: browser.clearcote?.path ?? '',
+            platform: browser.clearcote?.platform ?? 'auto',
+            brand: browser.clearcote?.brand ?? 'Chrome',
+            fingerprintProfile: browser.clearcote?.fingerprintProfile ?? '',
+            timezone: browser.clearcote?.timezone ?? '',
+            acceptLanguage: browser.clearcote?.acceptLanguage ?? '',
+            geoip: browser.clearcote?.geoip !== false,
+            humanize: browser.clearcote?.humanize !== false,
+            webrtcIp: browser.clearcote?.webrtcIp ?? '',
+            args: browser.clearcote?.args ?? []
         },
         cssInject: {
             animation: cssInject.animation || false,
@@ -127,10 +140,25 @@ export function saveBrowserConfig(data) {
     if (!config.browser) config.browser = {};
 
     if (data.path !== undefined) config.browser.path = data.path;
+    if (data.engine !== undefined) config.browser.engine = data.engine;
     if (data.headless !== undefined) config.browser.headless = data.headless;
     if (data.fission !== undefined) config.browser.fission = data.fission;
     if (data.humanizeCursor !== undefined) config.browser.humanizeCursor = data.humanizeCursor;
     if (data.ffVersion !== undefined) config.browser.ffVersion = data.ffVersion;
+    if (data.clearcote) {
+        if (!config.browser.clearcote) config.browser.clearcote = {};
+        const cc = data.clearcote;
+        if (cc.path !== undefined) config.browser.clearcote.path = cc.path;
+        if (cc.platform !== undefined) config.browser.clearcote.platform = cc.platform;
+        if (cc.brand !== undefined) config.browser.clearcote.brand = cc.brand;
+        if (cc.fingerprintProfile !== undefined) config.browser.clearcote.fingerprintProfile = cc.fingerprintProfile;
+        if (cc.timezone !== undefined) config.browser.clearcote.timezone = cc.timezone;
+        if (cc.acceptLanguage !== undefined) config.browser.clearcote.acceptLanguage = cc.acceptLanguage;
+        if (cc.geoip !== undefined) config.browser.clearcote.geoip = cc.geoip;
+        if (cc.humanize !== undefined) config.browser.clearcote.humanize = cc.humanize;
+        if (cc.webrtcIp !== undefined) config.browser.clearcote.webrtcIp = cc.webrtcIp;
+        if (cc.args !== undefined) config.browser.clearcote.args = Array.isArray(cc.args) ? cc.args : [];
+    }
     if (data.camoufox) {
         if (!config.browser.camoufox) config.browser.camoufox = {};
         const c = data.camoufox;
@@ -206,6 +234,7 @@ export function getInstancesConfig() {
 
     return instances.map(inst => ({
         name: inst.name,
+        engine: inst.engine || null,
         userDataMark: inst.userDataMark || null,
         proxy: inst.proxy ? {
             enable: inst.proxy.enable || false,
@@ -237,6 +266,10 @@ export function saveInstancesConfig(data) {
         const result = {
             name: inst.name
         };
+
+        if (inst.engine) {
+            result.engine = inst.engine;
+        }
 
         if (inst.userDataMark) {
             result.userDataMark = inst.userDataMark;

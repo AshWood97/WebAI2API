@@ -19,6 +19,8 @@ import { getSystemStatus } from '../../../utils/systemInfo.js';
 import { getTodayStats } from '../../../utils/stats.js';
 import { readCamoufoxVersion } from '../../../backend/engine/camoufoxMeta.js';
 import { PROJECT_CAMOUFOX_DIR } from '../../../backend/engine/camoufoxEnv.js';
+import { collectReferencedEngines, normalizeEngine, sanitizeRuntimeForApi } from '../../../backend/engine/engineContract.js';
+import { readClearcoteSdkVersion } from '../../../backend/engine/clearcoteMeta.js';
 
 /**
  * 创建 OpenAI API 路由处理器
@@ -72,6 +74,23 @@ export function createOpenAIRouter(context) {
         const models = getModels();
         const todayStats = getTodayStats();
 
+        const poolWorkers = poolContext?.poolManager?.workers || [];
+        const engines = (() => {
+            try {
+                return [...collectReferencedEngines(config)];
+            } catch {
+                return [normalizeEngine(config?.browser?.engine)];
+            }
+        })();
+
+        const workerBrowser = poolWorkers.map(w => sanitizeRuntimeForApi({
+            name: w.name,
+            instance: w.instanceName || null,
+            engine: w.engine || normalizeEngine(config?.browser?.engine),
+            userDataDir: w.userDataDir || null,
+            runtime: w.runtime || null
+        }));
+
         sendJson(res, 200, {
             service: 'webai2api',
             backend: backendName,
@@ -108,7 +127,14 @@ export function createOpenAIRouter(context) {
                 memoryUsage: system.memoryUsage,
                 systemVersion: system.systemVersion
             },
+            // 兼容旧字段
             camoufox: readCamoufoxVersion(process.env.CAMOUFOX_INSTALL_DIR || PROJECT_CAMOUFOX_DIR),
+            browser: {
+                defaultEngine: normalizeEngine(config?.browser?.engine),
+                engines,
+                clearcoteSdk: engines.includes('clearcote') ? (readClearcoteSdkVersion() || null) : null,
+                workers: workerBrowser
+            },
             keepaliveMode: config?.server?.keepalive?.mode || 'comment',
             timestamp: new Date().toISOString()
         });

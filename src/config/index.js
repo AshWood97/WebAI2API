@@ -12,6 +12,13 @@ import path from 'path';
 import yaml from 'yaml';
 
 import { logger } from '../utils/logger.js';
+import {
+    DEFAULT_BROWSER_ENGINE,
+    normalizeEngine,
+    resolveInstanceEngine,
+    resolveUserDataDirForEngine,
+    collectReferencedEngines
+} from '../backend/engine/engineContract.js';
 
 // --- 配置文件路径常量 ---
 const DATA_DIR = path.join(process.cwd(), 'data');
@@ -74,16 +81,13 @@ export function getConfigPath() {
 }
 
 /**
- * 解析用户数据目录路径
+ * 解析用户数据目录路径（引擎隔离）
  * @param {string|undefined} userDataMark - 用户数据标记
+ * @param {string} [engine] - camoufox | clearcote
  * @returns {string} 完整的用户数据目录路径
  */
-function resolveUserDataDir(userDataMark) {
-    const baseDir = path.join(process.cwd(), 'data');
-    if (!userDataMark) {
-        return path.join(baseDir, 'camoufoxUserData');
-    }
-    return path.join(baseDir, `camoufoxUserData_${userDataMark}`);
+function resolveUserDataDir(userDataMark, engine = 'camoufox') {
+    return resolveUserDataDirForEngine(userDataMark, engine, path.join(process.cwd(), 'data'));
 }
 
 /**
@@ -151,16 +155,18 @@ function validateWorker(worker, instanceName, index) {
  * @param {object} globalProxy - 全局代理配置
  * @returns {object[]} 扁平化的 worker 配置数组
  */
-function flattenInstancesToWorkers(instances, globalProxy) {
+function flattenInstancesToWorkers(instances, globalProxy, defaultEngine = DEFAULT_BROWSER_ENGINE) {
     const workers = [];
     const workerNames = new Set();
+    const globalEngine = normalizeEngine(defaultEngine, DEFAULT_BROWSER_ENGINE);
 
     for (let i = 0; i < instances.length; i++) {
         const instance = instances[i];
         validateInstance(instance, i);
 
-        // 解析 Instance 级配置
-        const userDataDir = resolveUserDataDir(instance.userDataMark);
+        // 解析 Instance 级配置（engine 决定 profile 目录前缀）
+        const engine = resolveInstanceEngine({ browser: { engine: globalEngine } }, instance);
+        const userDataDir = resolveUserDataDir(instance.userDataMark, engine);
         const resolvedProxy = resolveProxyConfig(globalProxy, instance.proxy);
 
         for (let j = 0; j < instance.workers.length; j++) {
@@ -183,6 +189,7 @@ function flattenInstancesToWorkers(instances, globalProxy) {
 
                 // 从 Instance 继承的属性
                 instanceName: instance.name,
+                engine,
                 userDataMark: instance.userDataMark || null,
                 userDataDir,
                 resolvedProxy
@@ -258,6 +265,23 @@ export function loadConfig() {
         // Camoufox FF152+ 已修复 juggler 拟人轨迹，默认启用内核 humanize
         config.browser.humanizeCursor = 'camou';
     }
+    // 全局默认引擎：camoufox | clearcote（重启后生效）
+    config.browser.engine = normalizeEngine(config.browser.engine, DEFAULT_BROWSER_ENGINE);
+    if (!config.browser.clearcote) config.browser.clearcote = {};
+    const ccCfg = config.browser.clearcote;
+    if (ccCfg.path === undefined) ccCfg.path = '';
+    if (ccCfg.platform === undefined) ccCfg.platform = 'auto';
+    if (ccCfg.brand === undefined) ccCfg.brand = 'Chrome';
+    if (ccCfg.fingerprintProfile === undefined) ccCfg.fingerprintProfile = '';
+    if (ccCfg.timezone === undefined) ccCfg.timezone = '';
+    if (ccCfg.acceptLanguage === undefined) ccCfg.acceptLanguage = '';
+    if (ccCfg.geoip === undefined) ccCfg.geoip = true;
+    if (ccCfg.humanize === undefined) ccCfg.humanize = true;
+    if (ccCfg.webrtcIp === undefined) ccCfg.webrtcIp = '';
+    if (!Array.isArray(ccCfg.args)) ccCfg.args = [];
+    if (!['auto', 'windows', 'linux'].includes(String(ccCfg.platform).toLowerCase())) {
+        throw new Error(`browser.clearcote.platform 非法: ${ccCfg.platform}（允许: auto | windows | linux）`);
+    }
     if (!config.browser.camoufox) config.browser.camoufox = {};
     const camouCfg = config.browser.camoufox;
     if (camouCfg.mainWorldEval === undefined) camouCfg.mainWorldEval = false;
@@ -307,11 +331,25 @@ export function loadConfig() {
         throw new Error('backend.pool.instances 不能为空数组');
     }
 
+    // 校验 instance.engine（未知值拒绝）
+    for (let i = 0; i < config.backend.pool.instances.length; i++) {
+        const inst = config.backend.pool.instances[i];
+        if (inst.engine !== undefined && inst.engine !== null && inst.engine !== '') {
+            try {
+                normalizeEngine(inst.engine);
+            } catch (e) {
+                throw new Error(`backend.pool.instances[${i}] (${inst.name || i}): ${e.message}`);
+            }
+        }
+    }
+
     // 展开 instances 为扁平化的 workers 数组
     config.backend.pool.workers = flattenInstancesToWorkers(
         config.backend.pool.instances,
-        config.browser?.proxy
+        config.browser?.proxy,
+        config.browser?.engine || DEFAULT_BROWSER_ENGINE
     );
+    config.backend.pool.referencedEngines = [...collectReferencedEngines(config)];
 
     // 设置队列配置默认值
     if (!config.queue) {
@@ -357,7 +395,7 @@ export function loadConfig() {
 }
 
 // 导出辅助函数供其他模块使用
-export { resolveUserDataDir, resolveProxyConfig };
+export { resolveUserDataDir, resolveProxyConfig, collectReferencedEngines };
 
 // 默认导出为函数
 export default loadConfig;

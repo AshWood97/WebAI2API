@@ -19,7 +19,7 @@ import os from 'os';
 import { createCursor } from 'ghost-cursor-playwright-port';
 import { getRealViewport, clamp, random, sleep } from './utils.js';
 import { logger } from '../../utils/logger.js';
-import { getBrowserProxy, cleanupProxy } from '../../utils/proxy.js';
+import { getBrowserProxy, getClearcoteProxy, cleanupProxy } from '../../utils/proxy.js';
 import { PROJECT_CAMOUFOX_DIR } from './camoufoxEnv.js';
 import {
     readCamoufoxVersion,
@@ -27,10 +27,22 @@ import {
     buildCamoufoxCapabilityOptions,
     camoufoxConfigKeySupported
 } from './camoufoxMeta.js';
+import {
+    normalizeEngine,
+    buildClearcoteLaunchOptions,
+    buildEngineRuntime,
+    shouldUseGhostCursor
+} from './engineContract.js';
+import {
+    importClearcoteSdk,
+    buildClearcoteRuntimeMeta,
+    readClearcoteSdkVersion
+} from './clearcoteMeta.js';
 
-// 全局状态：用于在登录模式下管理残留进程与复用上下文
+// 全局状态：跟踪全部活动 context（两种引擎）
+const activeContexts = new Set();
 let globalBrowserProcess = null;
-let globalContext = null; // 替代 globalBrowser
+let globalContext = null; // 最近一次启动的 context（兼容旧逻辑）
 
 /**
  * 清理浏览器资源和进程
@@ -39,17 +51,19 @@ let globalContext = null; // 替代 globalBrowser
  */
 export async function cleanup() {
 
-    // Level 1: 通过 Playwright 协议优雅关闭 Context，保存 Profile
-    if (globalContext) {
+    // Level 1: 通过 Playwright 协议优雅关闭全部 Context（Camoufox + Clearcote）
+    const contexts = [...activeContexts];
+    activeContexts.clear();
+    for (const context of contexts) {
         try {
-            logger.debug('浏览器', '正在断开远程调试连接并保存 Profile...');
-            await globalContext.close();
-            globalContext = null;
+            logger.debug('浏览器', '正在关闭浏览器上下文并保存 Profile...');
+            await context.close();
             logger.debug('浏览器', '已关闭浏览器上下文');
         } catch (e) {
             logger.warn('浏览器', `关闭上下文失败: ${e.message}`);
         }
     }
+    globalContext = null;
 
     // Level 2 & 3: 处理残留进程 (主要用于登录模式)
     if (globalBrowserProcess && !globalBrowserProcess.killed) {
@@ -250,15 +264,15 @@ async function getPersistentFingerprint(filePath, targetMajor = null) {
 
 /**
  * 启动浏览器实例 (仅负责启动，不负责导航和预热)
- * 
+ *
  * 导航到目标页面、注册导航处理器、预热行为由工作池 (pool.js) 负责。
- * 
+ *
  * @param {object} config - 全局配置对象
  * @param {object} options - 启动选项
  * @param {string} options.userDataDir - 用户数据目录路径
- * @param {string} [options.userDataMark] - 用户数据目录标识 (用于日志显示)
+ * @param {string} [options.engine] - camoufox | clearcote
  * @param {object} [options.proxyConfig] - Worker 级代理配置
- * @returns {Promise<{context: object, page: object}>} 浏览器上下文和初始页面
+ * @returns {Promise<{context, page, engine, runtime}>}
  */
 export async function initBrowserBase(config, options = {}) {
     const {
@@ -267,15 +281,13 @@ export async function initBrowserBase(config, options = {}) {
         proxyConfig = null
     } = options;
 
-    // 日志标识 (优先使用实例名称)
     const markLabel = instanceName || '默认';
+    const engine = normalizeEngine(options.engine || config?.browser?.engine);
 
-    // 检测登录模式和 Xvfb 模式
     const isLoginMode = process.argv.some(arg => arg.startsWith('-login'));
     const isXvfbMode = process.env.XVFB_RUNNING === 'true';
     const headlessMode = config?.browser?.headless && !isLoginMode && !isXvfbMode;
 
-    // 如果配置了无头模式但被强制禁用，输出原因
     if (config?.browser?.headless && !headlessMode) {
         const reasons = [];
         if (isLoginMode) reasons.push('登录模式');
@@ -283,150 +295,72 @@ export async function initBrowserBase(config, options = {}) {
         logger.info('浏览器', `[${markLabel}] 无头模式已被禁用 (${reasons.join(' + ')})`);
     }
 
-    logger.info('浏览器', `[${markLabel}] 启动浏览器实例...`);
+    logger.info('浏览器', `[${markLabel}] 启动浏览器实例 (engine=${engine})...`);
 
-    const browserConfig = config?.browser || {};
-
-    // 读取已安装 Camoufox 版本（用于 UA 迁移与日志）
-    const camoufoxVer = readCamoufoxVersion(PROJECT_CAMOUFOX_DIR)
-        || readCamoufoxVersion(process.env.CAMOUFOX_INSTALL_DIR || PROJECT_CAMOUFOX_DIR);
-    if (camoufoxVer) {
-        logger.info('浏览器', `[${markLabel}] Camoufox ${camoufoxVer.full} (Firefox ${camoufoxVer.major})`);
-    } else {
-        logger.warn('浏览器', `[${markLabel}] 未找到 camoufox/version.json，UA 迁移跳过`);
+    if (engine === 'clearcote') {
+        return await launchClearcoteBase({
+            config,
+            userDataDir,
+            proxyConfig,
+            markLabel,
+            headlessMode,
+            engine
+        });
     }
 
-    // 获取指纹对象（指纹文件放在对应的 userDataDir 内）
-    const fingerprintPath = path.join(userDataDir, 'fingerprint.json');
-    const myFingerprint = await getPersistentFingerprint(fingerprintPath, camoufoxVer?.major ?? null);
+    return await launchCamoufoxBase({
+        config,
+        userDataDir,
+        proxyConfig,
+        markLabel,
+        headlessMode,
+        engine
+    });
+}
 
-    // 构造 Camoufox 启动选项
-    const currentOS = getCurrentOS();
-    const capability = buildCamoufoxCapabilityOptions(browserConfig, camoufoxVer, myFingerprint);
-
-    const camoufoxConfig = {
-        forceScopeAccess: true,
-        // Canvas 抗指纹：注入固定噪点偏移
-        'canvas:aaOffset': myFingerprint.canvasOffset ?? 0,
-        'canvas:aaCapOffset': true
-    };
-
-    // 硬件/动画相关：仅当 properties 支持或作为 firefox pref
-    const firefoxUserPrefs = {
-        // 禁用背景模糊滤镜 (高 CPU 消耗)
-        'layout.css.backdrop-filter.enabled': false,
-        // 告诉网页用户倾向于减少动画 (触发网页自身的优化)
-        'ui.prefersReducedMotion': 1,
-        // 站点隔离
-        ...(browserConfig.fission === false ? { 'fission.autostart': false } : {})
-    };
-
-    // disableInstantAnimations：FF152 properties 已含该键时写入 camoufox config
-    if (capability._disableInstantAnimations) {
-        const propsPath = path.join(
-            PROJECT_CAMOUFOX_DIR,
-            'Camoufox.app', 'Contents', 'MacOS', 'properties.json'
-        );
-        const linuxPropsPath = path.join(PROJECT_CAMOUFOX_DIR, 'properties.json');
-        if (camoufoxConfigKeySupported(propsPath, 'disableInstantAnimations')
-            || camoufoxConfigKeySupported(linuxPropsPath, 'disableInstantAnimations')) {
-            camoufoxConfig.disableInstantAnimations = true;
-            firefoxUserPrefs['ui.prefersReducedMotion'] = 1;
-        } else {
-            firefoxUserPrefs['ui.prefersReducedMotion'] = 1;
-        }
-    }
-
-    const camoufoxLaunchOptions = {
-        executable_path: browserConfig.path || undefined,
-        headless: headlessMode,
-        user_data_dir: userDataDir,
-        fingerprint: myFingerprint,
-        os: currentOS,
-        i_know_what_im_doing: true,
-        webgl_config: myFingerprint.videoCard ? [myFingerprint.videoCard['webGl:vendor'], myFingerprint.videoCard['webGl:renderer']] : undefined,
-        exclude_addons: ['UBO'],
-        humanize: capability.humanize === undefined
-            ? (browserConfig.humanizeCursor === 'camou')
-            : capability.humanize,
-        config: camoufoxConfig,
-        firefox_user_prefs: firefoxUserPrefs,
-        // 新版能力项（ff_version / main_world_eval / enable_cache / window / block_webrtc / geoip）
-        ...(capability.ff_version !== undefined ? { ff_version: capability.ff_version } : {}),
-        ...(capability.main_world_eval !== undefined ? { main_world_eval: capability.main_world_eval } : {}),
-        ...(capability.enable_cache !== undefined ? { enable_cache: capability.enable_cache } : {}),
-        ...(capability.window ? { window: capability.window } : {}),
-        ...(capability.locale !== undefined ? { locale: capability.locale } : {}),
-        ...(capability.certificates !== undefined ? { certificates: capability.certificates } : {}),
-        ...(capability.certificatePaths !== undefined ? { certificatePaths: capability.certificatePaths } : {}),
-        block_webrtc: capability.block_webrtc !== false,
-        geoip: capability.geoip !== false
-    };
-
-    // 代理配置
-    const proxyObj = await getBrowserProxy(proxyConfig);
-    if (proxyObj) {
-        camoufoxLaunchOptions.proxy = proxyObj;
-    }
-
-    // 启动 Camoufox
-    const context = await Camoufox(camoufoxLaunchOptions);
+/**
+ * 注册活动 context 并绑定 close 清理
+ * @private
+ */
+function trackContext(context, markLabel) {
+    activeContexts.add(context);
     globalContext = context;
-
-    // 构建状态描述
-    const statusParts = [];
-    statusParts.push(`无头模式: ${headlessMode ? '是' : '否'}`);
-    if (camoufoxVer) statusParts.push(`Camoufox: ${camoufoxVer.full}`);
-    if (proxyObj) statusParts.push('代理: 已配置');
-    if (camoufoxLaunchOptions.humanize) statusParts.push('内核拟人轨迹: 开');
-    logger.info('浏览器', `[${markLabel}] 浏览器已启动 (${statusParts.join(', ')})`);
-
-    // 注册清理处理器
-    registerCleanupHandlers();
-
-    // 注册断开连接事件（不再自动退出进程，由 Worker 决定后续行为）
     context.on('close', async () => {
         logger.warn('浏览器', `[${markLabel}] 浏览器已断开连接`);
-        // 清理全局状态，但不退出进程
-        globalContext = null;
+        activeContexts.delete(context);
+        if (globalContext === context) {
+            globalContext = null;
+        }
         globalBrowserProcess = null;
     });
+}
 
-    // 获取或创建 Page
-    let page;
+/**
+ * @private
+ */
+async function resolveInitialPage(context) {
     const existingPages = context.pages();
     if (existingPages.length > 0) {
-        page = existingPages[0];
-    } else {
-        page = await context.newPage();
+        return existingPages[0];
     }
+    return await context.newPage();
+}
 
-    // 不强制 setViewportSize：与 Camoufox 窗口 spoof / attachNoViewportDefault 协同（#666）
-    // 仅记录当前视口，便于排障
-    try {
-        const vp = page.viewportSize();
-        const screenW = myFingerprint.screen?.availWidth || myFingerprint.screen?.width;
-        const screenH = myFingerprint.screen?.availHeight || myFingerprint.screen?.height;
-        logger.debug('浏览器', `[${markLabel}] 视口: ${vp?.width || 'null'}x${vp?.height || 'null'}，指纹屏幕: ${screenW}x${screenH}`);
-    } catch { /* ignore */ }
-
-    // CSS 性能优化注入
+/**
+ * @private
+ */
+async function maybeInjectCss(context, browserConfig, markLabel) {
     const cssInjectConfig = browserConfig.cssInject || {};
     const cssToInject = [];
 
     if (cssInjectConfig.animation) {
         cssToInject.push(`
             *, *::before, *::after {
-                /* 过渡和关键帧动画 */
                 transition: none !important;
                 animation: none !important;
                 transition-property: none !important;
-                
-                /* 平滑滚动 */
                 scroll-behavior: auto !important;
             }
-            
-            /* transform 动画 */
             *:not(dummy-selector) {
                 transition-duration: 0s !important;
                 animation-duration: 0s !important;
@@ -456,10 +390,10 @@ export async function initBrowserBase(config, options = {}) {
         `);
     }
 
-    // 只有当至少一个开关启用时才进行注入，防止影响浏览器指纹
-    if (cssToInject.length > 0) {
-        const cssString = cssToInject.join('\n');
-        await context.addInitScript(`
+    if (cssToInject.length === 0) return;
+
+    const cssString = cssToInject.join('\n');
+    await context.addInitScript(`
             (function() {
                 const style = document.createElement('style');
                 style.textContent = ${JSON.stringify(cssString)};
@@ -472,19 +406,181 @@ export async function initBrowserBase(config, options = {}) {
                 }
             })();
         `);
-        const enabledFeatures = [];
-        if (cssInjectConfig.animation) enabledFeatures.push('动画禁用');
-        if (cssInjectConfig.filter) enabledFeatures.push('滤镜禁用');
-        if (cssInjectConfig.font) enabledFeatures.push('字体优化');
-        logger.info('浏览器', `[${markLabel}] CSS 注入已启用: ${enabledFeatures.join(', ')}`);
+    const enabledFeatures = [];
+    if (cssInjectConfig.animation) enabledFeatures.push('动画禁用');
+    if (cssInjectConfig.filter) enabledFeatures.push('滤镜禁用');
+    if (cssInjectConfig.font) enabledFeatures.push('字体优化');
+    logger.info('浏览器', `[${markLabel}] CSS 注入已启用: ${enabledFeatures.join(', ')}`);
+}
+
+/**
+ * Camoufox 启动链（保持原有行为与 import 顺序）
+ * @private
+ */
+async function launchCamoufoxBase({ config, userDataDir, proxyConfig, markLabel, headlessMode, engine }) {
+    const browserConfig = config?.browser || {};
+
+    const camoufoxVer = readCamoufoxVersion(PROJECT_CAMOUFOX_DIR)
+        || readCamoufoxVersion(process.env.CAMOUFOX_INSTALL_DIR || PROJECT_CAMOUFOX_DIR);
+    if (camoufoxVer) {
+        logger.info('浏览器', `[${markLabel}] Camoufox ${camoufoxVer.full} (Firefox ${camoufoxVer.major})`);
+    } else {
+        logger.warn('浏览器', `[${markLabel}] 未找到 camoufox/version.json，UA 迁移跳过`);
     }
 
-    // 返回 context 和 page（导航、预热、cursor 初始化由工作池负责）
-    return {
-        context,
-        page
+    const fingerprintPath = path.join(userDataDir, 'fingerprint.json');
+    const myFingerprint = await getPersistentFingerprint(fingerprintPath, camoufoxVer?.major ?? null);
+
+    const currentOS = getCurrentOS();
+    const capability = buildCamoufoxCapabilityOptions(browserConfig, camoufoxVer, myFingerprint);
+
+    const camoufoxConfig = {
+        forceScopeAccess: true,
+        'canvas:aaOffset': myFingerprint.canvasOffset ?? 0,
+        'canvas:aaCapOffset': true
     };
+
+    const firefoxUserPrefs = {
+        'layout.css.backdrop-filter.enabled': false,
+        'ui.prefersReducedMotion': 1,
+        ...(browserConfig.fission === false ? { 'fission.autostart': false } : {})
+    };
+
+    if (capability._disableInstantAnimations) {
+        const propsPath = path.join(
+            PROJECT_CAMOUFOX_DIR,
+            'Camoufox.app', 'Contents', 'MacOS', 'properties.json'
+        );
+        const linuxPropsPath = path.join(PROJECT_CAMOUFOX_DIR, 'properties.json');
+        if (camoufoxConfigKeySupported(propsPath, 'disableInstantAnimations')
+            || camoufoxConfigKeySupported(linuxPropsPath, 'disableInstantAnimations')) {
+            camoufoxConfig.disableInstantAnimations = true;
+        }
+        firefoxUserPrefs['ui.prefersReducedMotion'] = 1;
+    }
+
+    const camoufoxLaunchOptions = {
+        executable_path: browserConfig.path || undefined,
+        headless: headlessMode,
+        user_data_dir: userDataDir,
+        fingerprint: myFingerprint,
+        os: currentOS,
+        i_know_what_im_doing: true,
+        webgl_config: myFingerprint.videoCard ? [myFingerprint.videoCard['webGl:vendor'], myFingerprint.videoCard['webGl:renderer']] : undefined,
+        exclude_addons: ['UBO'],
+        humanize: capability.humanize === undefined
+            ? (browserConfig.humanizeCursor === 'camou')
+            : capability.humanize,
+        config: camoufoxConfig,
+        firefox_user_prefs: firefoxUserPrefs,
+        ...(capability.ff_version !== undefined ? { ff_version: capability.ff_version } : {}),
+        ...(capability.main_world_eval !== undefined ? { main_world_eval: capability.main_world_eval } : {}),
+        ...(capability.enable_cache !== undefined ? { enable_cache: capability.enable_cache } : {}),
+        ...(capability.window ? { window: capability.window } : {}),
+        ...(capability.locale !== undefined ? { locale: capability.locale } : {}),
+        ...(capability.certificates !== undefined ? { certificates: capability.certificates } : {}),
+        ...(capability.certificatePaths !== undefined ? { certificatePaths: capability.certificatePaths } : {}),
+        block_webrtc: capability.block_webrtc !== false,
+        geoip: capability.geoip !== false
+    };
+
+    const proxyObj = await getBrowserProxy(proxyConfig);
+    if (proxyObj) {
+        camoufoxLaunchOptions.proxy = proxyObj;
+    }
+
+    const context = await Camoufox(camoufoxLaunchOptions);
+    trackContext(context, markLabel);
+
+    const statusParts = [];
+    statusParts.push(`无头模式: ${headlessMode ? '是' : '否'}`);
+    if (camoufoxVer) statusParts.push(`Camoufox: ${camoufoxVer.full}`);
+    if (proxyObj) statusParts.push('代理: 已配置');
+    if (camoufoxLaunchOptions.humanize) statusParts.push('内核拟人轨迹: 开');
+    logger.info('浏览器', `[${markLabel}] 浏览器已启动 (${statusParts.join(', ')})`);
+
+    registerCleanupHandlers();
+
+    const page = await resolveInitialPage(context);
+
+    try {
+        const vp = page.viewportSize();
+        const screenW = myFingerprint.screen?.availWidth || myFingerprint.screen?.width;
+        const screenH = myFingerprint.screen?.availHeight || myFingerprint.screen?.height;
+        logger.debug('浏览器', `[${markLabel}] 视口: ${vp?.width || 'null'}x${vp?.height || 'null'}，指纹屏幕: ${screenW}x${screenH}`);
+    } catch { /* ignore */ }
+
+    await maybeInjectCss(context, browserConfig, markLabel);
+
+    const runtime = buildEngineRuntime({
+        engine,
+        version: camoufoxVer?.full || null,
+        release: camoufoxVer ? `Firefox ${camoufoxVer.major}` : null,
+        hostPlatform: os.platform(),
+        binarySource: browserConfig.path ? 'explicit-path' : 'project-camoufox',
+        capabilities: {
+            nativeHumanize: camoufoxLaunchOptions.humanize === true,
+            geoip: camoufoxLaunchOptions.geoip !== false,
+            blockWebRtc: camoufoxLaunchOptions.block_webrtc !== false
+        }
+    });
+    runtime.userDataDir = userDataDir;
+
+    return { context, page, engine, runtime };
+}
+
+/**
+ * Clearcote 启动链（lazy-import SDK；不透传 Firefox 字段）
+ * @private
+ */
+async function launchClearcoteBase({ config, userDataDir, proxyConfig, markLabel, headlessMode, engine }) {
+    const browserConfig = config?.browser || {};
+    const clearcoteSdk = await importClearcoteSdk();
+    if (typeof clearcoteSdk.launchPersistentContext !== 'function') {
+        throw new Error('clearcote SDK 未导出 launchPersistentContext，请安装已核验版本 0.30.0');
+    }
+
+    const proxyObj = await getClearcoteProxy(proxyConfig);
+    const launchOptions = buildClearcoteLaunchOptions({
+        browserConfig,
+        userDataDir,
+        headless: headlessMode,
+        proxy: proxyObj,
+        hostPlatform: os.platform()
+    });
+
+    const context = await clearcoteSdk.launchPersistentContext(userDataDir, launchOptions);
+    trackContext(context, markLabel);
+
+    const statusParts = [];
+    statusParts.push(`无头模式: ${headlessMode ? '是' : '否'}`);
+    statusParts.push(`Clearcote SDK: ${readClearcoteSdkVersion() || 'unknown'}`);
+    statusParts.push(`platform: ${launchOptions.platform}`);
+    statusParts.push(launchOptions.executablePath ? 'binary: explicit' : 'binary: sdk-resolve');
+    if (proxyObj) statusParts.push('代理: 已配置');
+    if (launchOptions.humanize) statusParts.push('内核拟人轨迹: 开');
+    logger.info('浏览器', `[${markLabel}] Clearcote 浏览器已启动 (${statusParts.join(', ')})`);
+
+    registerCleanupHandlers();
+
+    const page = await resolveInitialPage(context);
+    await maybeInjectCss(context, browserConfig, markLabel);
+
+    const runtime = buildClearcoteRuntimeMeta({
+        hostPlatform: os.platform(),
+        executablePath: launchOptions.executablePath || null,
+        fingerprintPlatform: launchOptions.platform,
+        seedSource: 'profile-persistent'
+    });
+    runtime.userDataDir = userDataDir;
+    runtime.capabilities = {
+        ...runtime.capabilities,
+        nativeHumanize: launchOptions.humanize === true,
+        geoip: launchOptions.geoip !== false
+    };
+
+    return { context, page, engine, runtime };
 }
 
 // 导出工具函数供 pool.js 使用
-export { createCursor, getRealViewport, clamp, random, sleep };
+export { createCursor, getRealViewport, clamp, random, sleep, shouldUseGhostCursor };

@@ -68,7 +68,8 @@ This project supports both **source code execution** and **Docker containerized 
 
 - **Node.js**: v20.0.0+ (ABI 115+)
 - **OS**: Windows / Linux / macOS
-- **Core Dependency**: Camoufox (automatically downloaded during installation)
+- **Core Dependency**: Camoufox (default engine; automatically downloaded during installation)
+- **Optional engine**: Clearcote Chromium via `clearcote@0.30.0` (Windows x64 / Linux x64 official builds; macOS on roadmap). Configure `browser.engine: clearcote` or per-instance `engine`. Profiles use `data/clearcoteUserData*`. Free GitHub build defaults to one concurrent Clearcote browser. No PRO license. Restart required after engine switch.
 
 ### 🛠️ Method 1: Manual Deployment
 

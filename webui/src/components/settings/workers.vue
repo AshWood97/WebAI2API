@@ -61,6 +61,11 @@ const columns = [
         key: 'name',
     },
     {
+        title: '引擎',
+        dataIndex: 'engine',
+        key: 'engine',
+    },
+    {
         title: 'Worker 数量',
         dataIndex: 'workerCount',
         key: 'workerCount',
@@ -172,6 +177,7 @@ const editingInstance = ref(null);
 // 编辑表单数据
 const editForm = ref({
     name: '',
+    engine: '',
     userDataMark: '',
     proxy: false,
     proxyType: 'socks5',
@@ -190,6 +196,7 @@ const handleCreateInstance = () => {
     // 重置表单为默认值
     editForm.value = {
         name: `instance-${(instanceData.value || []).length + 1}-${randomSuffix}`,
+        engine: '',
         userDataMark: '',
         proxy: false,
         proxyType: 'socks5',
@@ -209,6 +216,7 @@ const handleEdit = (record) => {
     // 填充表单数据
     editForm.value = {
         name: record.name,
+        engine: record.engine || '',
         userDataMark: record.userDataMark || '',
         proxy: record.proxy ? true : false,
         proxyType: record.proxy?.type || 'socks5',
@@ -238,6 +246,7 @@ const handleSaveEdit = async () => {
     // 构建要保存的对象结构
     const instanceToSave = {
         name: editForm.value.name,
+        engine: editForm.value.engine || null,
         userDataMark: editForm.value.userDataMark,
         workers: editForm.value.workers,
         // 如果启用了代理，则构建代理对象，否则为 null
@@ -446,6 +455,13 @@ const handleRemoveWorker = (index) => {
                         <a>{{ record.name }}</a>
                     </template>
 
+                    <!-- 引擎 -->
+                    <template v-else-if="column.key === 'engine'">
+                        <a-tag :color="record.engine === 'clearcote' ? 'blue' : (record.engine === 'camoufox' ? 'green' : 'default')">
+                            {{ record.engine || '继承全局' }}
+                        </a-tag>
+                    </template>
+
                     <!-- Worker 数量 -->
                     <template v-else-if="column.key === 'workerCount'">
                         {{ record.workers ? record.workers.length : 0 }}
@@ -490,6 +506,21 @@ const handleRemoveWorker = (index) => {
                         用于区分实例数据存储的文件夹名称 (userDataMark)
                     </div>
                     <a-input v-model:value="editForm.userDataMark" placeholder="请输入数据标记，如: main-gemini" />
+                </div>
+
+                <!-- 浏览器引擎 -->
+                <div style="margin-bottom: 16px;">
+                    <div style="font-weight: 600; margin-bottom: 4px;">浏览器引擎</div>
+                    <div style="font-size: 12px; color: #8c8c8c; margin-bottom: 8px;">
+                        继承全局 browser.engine，或覆盖为 camoufox / clearcote。不同引擎 profile 目录隔离：
+                        camoufoxUserData* 与 clearcoteUserData* 不可互换。切换需重启服务。
+                    </div>
+                    <a-select v-model:value="editForm.engine" placeholder="继承全局 browser.engine" allowClear
+                        style="width: 100%">
+                        <a-select-option value="">继承全局 browser.engine</a-select-option>
+                        <a-select-option value="camoufox">Camoufox</a-select-option>
+                        <a-select-option value="clearcote">Clearcote（Windows/Linux x64）</a-select-option>
+                    </a-select>
                 </div>
 
                 <!-- 代理设置（折叠面板） -->

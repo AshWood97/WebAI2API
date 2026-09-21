@@ -58,10 +58,13 @@ backend:
       # [实例 1] 默认浏览器实例
       # ------------------------------------------------
       - name: "browser_default"        # 实例 ID (用于日志显示和Cookie获取)
-        # userDataMark 不设置时，数据存放在 data/camoufoxUserData
+        # engine 可省略，继承 browser.engine（camoufox | clearcote）
+        # engine: camoufox
+        # userDataMark 不设置时，数据存放在 data/camoufoxUserData（Clearcote 为 data/clearcoteUserData）
         # 同一实例下的所有 Worker 共享浏览器数据和登录状态
         # 使用 Google OAuth 等统一登录时，只需登录一次即可用于所有 Worker
-        
+        # ⚠️ 不同引擎的 profile 绝不混用，也不要在 camoufoxUserData 与 clearcoteUserData 之间拷贝登录态
+
         # 该浏览器实例具备的能力 (适配器列表)
         # 相当于在这个浏览器里打开了不同的标签页
         workers:
@@ -94,7 +97,7 @@ backend:
       # [实例 2] 独立数据目录 + 专属代理
       # - name: "browser_us_01"
       #   userDataMark: "us_01"        # 数据目录: data/camoufoxUserData_us_01
-      #   
+      #
       #   # 实例级代理 (该实例下所有 Worker 共享此代理)
       #   proxy:
       #     enable: true
@@ -107,17 +110,25 @@ backend:
       #   workers:
       #     - name: "us_lmarena"
       #       type: lmarena
-      #     
+      #
       #     - name: "us_zai"
       #       type: zai_is
-      #     
+      #
       #     # 聚合类型 Worker (单标签多后端)
       #     - name: "us_merged"
       #       type: merge
       #       mergeTypes: [gemini_biz, nanobananafree_ai]
       #       mergeMonitor: gemini_biz  # 空闲时挂机监控的后端 (可选，留空则不启用)
 
-      # [实例 3] 强制直连 (不使用代理)
+      # [实例 3] Clearcote Chromium 基座（与 Camoufox 同时运行；需 Windows/Linux x64）
+      # - name: "browser_chromium"
+      #   engine: clearcote
+      #   userDataMark: "clearcote-main"   # 数据目录: data/clearcoteUserData_clearcote-main
+      #   workers:
+      #     - name: "cc_test"
+      #       type: test
+
+      # [实例 4] 强制直连 (不使用代理)
       # - name: "browser_direct"
       #   userDataMark: "direct"
       #   proxy:
@@ -159,12 +170,20 @@ queue:
   imageLimit: 5
 
 browser:
+  # 全局默认浏览器基座：camoufox | clearcote
+  # - camoufox: 当前默认，Firefox/Camoufox 链路（macOS/Windows/Linux）
+  # - clearcote: 官方 Node SDK + Playwright launchPersistentContext（Chromium）
+  #   官方发行版当前支持 Windows x64 / Linux x64；macOS 仍在 roadmap，选 clearcote 会在预检/启动时报错
+  # 切换在重启服务后生效，不做运行中热切换；适配器与 API 模型 ID 不感知基座
+  engine: camoufox
+
   # 浏览器可执行文件路径 (留空则使用默认的)
   # 非必要不建议修改，否则你要处理很多额外依赖
   # Windows系统示例 "C:\\camoufox\\camoufox.exe"
   # Linux系统示例 "/opt/camoufox/camoufox"
+  # 此字段仅用于 Camoufox；Clearcote 请使用 clearcote.path
   path: ""
-  
+
   # 是否启用无头模式
   headless: false
 
@@ -172,12 +191,14 @@ browser:
   # - false:  禁用拟人轨迹，使用 Playwright 原生点击（性能最好，但会被自动化检测）
   # - true:   使用项目优化的 ghost-cursor（更拟人化，如不会点击正中心，但性能稍差）
   # - "camou": 使用 Camoufox 内置轨迹（推荐；FF152+ 已修复 juggler humanize）
+  # Clearcote: clearcote.humanize=true 时优先用引擎原生 humanize，不再叠加 ghost-cursor
   humanizeCursor: "camou"
 
   # 显式指定 Firefox 主版本 spoof（默认省略=跟随 npm run init 安装的 Camoufox）
+  # 仅 Camoufox；不会传给 Clearcote
   # ffVersion: 152
 
-  # Camoufox 0.12 / FF152 能力开关
+  # Camoufox 0.12 / FF152 能力开关（仅 Camoufox；不会传给 Clearcote）
   camoufox:
     mainWorldEval: false
     enableCache: false
@@ -193,6 +214,30 @@ browser:
     #   - /etc/ssl/corp-ca.pem
     # certificates: []
 
+  # Clearcote（Chromium 基座）配置
+  # 开源/可验证路线：npm clearcote@0.30.0，二进制由 SDK SHA-256 校验后缓存
+  # 不引入 PRO 许可证；免费 GitHub 构建默认同时仅 1 个 Clearcote 浏览器（官方免费档限制）
+  clearcote:
+    # 空值 = SDK 解析并校验缓存中的官方构建；非空 = 显式可执行文件路径
+    path: ""
+    # 指纹 platform：auto | windows | linux（auto 按宿主机解析）
+    # 注意：这是指纹人格，不是二进制平台；二进制仍按宿主 OS 下载
+    platform: auto
+    # UA/UA-CH 品牌：Chrome | Edge | Opera | Vivaldi
+    brand: Chrome
+    # 可选：真实机器指纹 profile 文件路径（空值使用 profile 目录内持久 seed）
+    fingerprintProfile: ""
+    timezone: ""
+    acceptLanguage: ""
+    # 自动按代理出口 IP 对齐 timezone/language/webrtc
+    geoip: true
+    # 引擎原生拟人输入（true 时不再叠加 ghost-cursor）
+    humanize: true
+    # WebRTC 报告 IP（空=不显式设置；geoip 可自动填充）
+    webrtcIp: ""
+    # 仅 Clearcote/Chromium 参数；不会自动继承 Firefox/Camoufox 参数
+    # 容器内如需 --no-sandbox，请在此显式添加，项目不会偷偷降低安全边界
+    args: []
 
   # 站点隔离 (fission.autostart)
   # 开启保持 Firefox 默认开启状态

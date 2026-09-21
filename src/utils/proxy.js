@@ -6,10 +6,9 @@
 import { anonymizeProxy, closeAnonymizedProxy } from 'proxy-chain';
 import { logger } from './logger.js';
 
-// 全局代理状态：用于清理 proxy-chain 创建的本地代理资源
+// 全局代理状态：支持多个 proxy-chain relay（多实例 SOCKS5 认证）
 const proxyState = {
-    anonymizedProxyUrl: null,  // 转换后的 HTTP 代理地址
-    originalProxyUrl: null      // 原始代理地址
+    anonymizedProxies: new Set()
 };
 
 /**
@@ -65,9 +64,8 @@ export async function getHttpProxy(proxyConfig) {
             logger.info('代理器', `检测到 SOCKS5 代理，正在转换为 HTTP 代理: ${host}:${port}`);
             const httpProxyUrl = await anonymizeProxy(originalUrl);
 
-            // 保存状态用于后续清理
-            proxyState.anonymizedProxyUrl = httpProxyUrl;
-            proxyState.originalProxyUrl = originalUrl;
+            // 记录全部 relay，便于退出时统一清理
+            proxyState.anonymizedProxies.add(httpProxyUrl);
 
             logger.info('代理器', `SOCKS5 代理已转换为 HTTP 代理: ${httpProxyUrl}`);
             return httpProxyUrl;
@@ -118,19 +116,56 @@ export async function getBrowserProxy(proxyConfig) {
 }
 
 /**
+ * 获取 Clearcote/Playwright 标准代理对象
+ * - HTTP：拆出 server/username/password
+ * - SOCKS5 无认证：直接 socks5://
+ * - SOCKS5 带认证：复用 proxy-chain relay（Chromium 无法原生认证 SOCKS5，禁止静默丢密码）
+ * @param {object} proxyConfig
+ * @returns {Promise<object|null>}
+ */
+export async function getClearcoteProxy(proxyConfig) {
+    if (!proxyConfig || !proxyConfig.enable) {
+        return null;
+    }
+
+    const { type, host, port, user, passwd } = proxyConfig;
+    const hasAuth = !!(user || passwd);
+
+    if (type === 'socks5' && hasAuth) {
+        logger.info('代理器', 'Clearcote: SOCKS5 带认证，通过本地 relay 转换为 HTTP 代理（不会静默丢弃密码）');
+        const httpProxyUrl = await getHttpProxy(proxyConfig);
+        if (!httpProxyUrl) {
+            throw new Error('Clearcote SOCKS5 认证代理 relay 创建失败');
+        }
+        return { server: httpProxyUrl };
+    }
+
+    if (type === 'socks5') {
+        return { server: `socks5://${host}:${port}` };
+    }
+
+    const server = `http://${host}:${port}`;
+    if (hasAuth) {
+        return { server, username: user, password: passwd };
+    }
+    return { server };
+}
+
+/**
  * 清理代理资源
  * 关闭由 proxy-chain 创建的本地代理服务器
  */
 export async function cleanupProxy() {
-    if (proxyState.anonymizedProxyUrl) {
+    if (proxyState.anonymizedProxies.size === 0) {
+        return;
+    }
+    const urls = [...proxyState.anonymizedProxies];
+    proxyState.anonymizedProxies.clear();
+    for (const url of urls) {
         try {
             logger.debug('代理器', '正在关闭本地代理桥接...');
-            await closeAnonymizedProxy(proxyState.anonymizedProxyUrl, true);
+            await closeAnonymizedProxy(url, true);
             logger.debug('代理器', '本地代理桥接已关闭');
-
-            // 清理状态
-            proxyState.anonymizedProxyUrl = null;
-            proxyState.originalProxyUrl = null;
         } catch (error) {
             logger.error('代理器', `关闭本地代理桥接失败: ${error.message}`);
         }

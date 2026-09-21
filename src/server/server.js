@@ -19,7 +19,7 @@ import http from 'http';
 
 // ==================== 启动前自检 ====================
 import { runPreflight } from './preflight.js';
-runPreflight();
+await runPreflight();
 // ==================== 加载其他依赖 ====================
 const { getBackend } = await import('../backend/index.js');
 const { logger } = await import('../utils/logger.js');

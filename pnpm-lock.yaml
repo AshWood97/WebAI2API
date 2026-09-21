@@ -17,6 +17,9 @@ importers:
       camoufox-js:
         specifier: ^0.12.0
         version: 0.12.0(playwright-core@1.60.0)
+      clearcote:
+        specifier: 0.30.0
+        version: 0.30.0
       compressing:
         specifier: ^2.0.0
         version: 2.0.0
@@ -383,6 +386,9 @@ packages:
   '@types/node@24.10.1':
     resolution: {integrity: sha512-GNWcUTRBgIRJD5zj+Tq0fKOJ5XZajIiBroOF0yvj2bSU1WvNdYS/dn9UxwsujGW4JX06dnHyjV2y9rRaybH0iQ==}
 
+  '@types/yauzl@2.10.3':
+    resolution: {integrity: sha512-oJoftv0LSuaDZE3Le4DbKX+KS9G36NzOeSap90UIK0yMA/NhKJhqlSGtNDORNRaIbQfzjXDrQa0ytJ6mNRGz/Q==}
+
   adm-zip@0.5.16:
     resolution: {integrity: sha512-TGw5yVi4saajsSEgz25grObGHEUaDrniwvA2qwSC060KfqGPdglhvPMA2lPIoxs3PQIItj2iag35fONcQqgUaQ==}
     engines: {node: '>=12.0'}
@@ -506,6 +512,11 @@ packages:
   chownr@1.1.4:
     resolution: {integrity: sha512-jJ0bqzaylmJtVnNgzTeSOs8DPavpbYgEr/b0YL8/2GO3xJEhInFmhKMUnEJQjZumK7KXGFhUy89PrsJWlakBVg==}
 
+  clearcote@0.30.0:
+    resolution: {integrity: sha512-HMFnYXSDQxEB9qIAakats7is0oOW4Vk+V43scAVRYFwPPLGHbIXz+JstX25BkIcBy8vmzg0CdMWuvGSlpauvmg==}
+    engines: {node: '>=20'}
+    hasBin: true
+
   cli-progress@3.12.0:
     resolution: {integrity: sha512-tRkV3HJ1ASwm19THiiLIXLO7Im7wlTuKnvkYaTkyoAPefqjNg7W7DHKUlGRxy9vxDvbyCYQkQozvptuMkGCg8A==}
     engines: {node: '>=4'}
@@ -601,8 +612,16 @@ packages:
     resolution: {integrity: sha512-XYfuKMvj4O35f/pOXLObndIRvyQ+/+6AhODh+OKWj9S9498pHHn/IMszH+gt0fBCRWMNfk1ZSp5x3AifmnI2vg==}
     engines: {node: '>=6'}
 
+  extract-zip@2.0.1:
+    resolution: {integrity: sha512-GDhU9ntwuKyGXdZBUgTIe+vXnWj0fppUEtMDL0+idd5Sta8TGpHssn/eusA9mrPr9qNDym6SxAYZjNvCn/9RBg==}
+    engines: {node: '>= 10.17.0'}
+    hasBin: true
+
   fd-slicer2@1.2.0:
     resolution: {integrity: sha512-3lBUNUckhMZduCc4g+Pw4Ve16LD9vpX9b8qUkkKq2mgDRLYWzblszZH2luADnJqjJe+cypngjCuKRm/IW12rRw==}
+
+  fd-slicer@1.1.0:
+    resolution: {integrity: sha512-cE1qsB/VwyQozZ+q1dGxR8LBYNZeofhEdUNGSMbQD3Gw2lAzX9Zb3uIU6Ebc/Fmyjo9AWWfnn0AUCHqtevs/8g==}
 
   file-uri-to-path@1.0.0:
     resolution: {integrity: sha512-0Zt+s3L7Vf1biwWZ29aARiVYLx7iMGnEUl9x33fbB/j3jR81u/O2LbqK+Bm1CDSNDKVtJ/YjwY7TUd5SkeLQLw==}
@@ -653,6 +672,10 @@ packages:
 
   get-ready@1.0.0:
     resolution: {integrity: sha512-mFXCZPJIlcYcth+N8267+mghfYN9h3EhsDa6JSnbA3Wrhh/XFpuowviFcsDeYZtKspQyWyJqfs4O6P8CHeTwzw==}
+
+  get-stream@5.2.0:
+    resolution: {integrity: sha512-nBF+F1rAZVCu/p7rjzgA+Yb4lfYXrpl7a6VmJrU8wF9I1CKvP/QwPNZHnOlwbTkY6dvtFIzFMSyQXbLoTQPRpA==}
+    engines: {node: '>=8'}
 
   get-stream@9.0.1:
     resolution: {integrity: sha512-kVCxPF3vQM/N0B1PmoqVUqgHP+EeVjmZSQn+1oCRPxd2P21P2F19lIgbR3HBosbB1PUhOAoctJnfEn2GbN2eZA==}
@@ -850,6 +873,10 @@ packages:
     resolution: {integrity: sha512-/IXtbwEk5HTPyEwyKX6hGkYXxM9nbj64B+ilVJnC/R6B0pH5G4V3b0pVbL7DBj4tkhBAppbQUlf6F6Xl9LHu1g==}
     engines: {node: '>= 0.4'}
 
+  maxmind@4.3.29:
+    resolution: {integrity: sha512-Vxx0rh7omBekjZnsDxpw35SrGGM3Uy7NoIKWzZlvh3UcjihGaySR8n+YSQ8YBseCvhEn+yehA98rZkTDW+uhPw==}
+    engines: {node: '>=12', npm: '>=6'}
+
   maxmind@5.0.1:
     resolution: {integrity: sha512-hYxQxvHkBUlyF34f7IlQOb60rytezCi2oZ8H/BtZpcoodXTlcK1eLgf7kY2TofHqBC3o+Hqtvde9kS72gFQSDw==}
     engines: {node: '>=12', npm: '>=6'}
@@ -875,6 +902,10 @@ packages:
 
   mkdirp-classic@0.5.3:
     resolution: {integrity: sha512-gKLcREMhtuZRwRAfqP3RFW+TK4JqApVBtOIftVgjuABpAtpxhPGaDcfvbhNvD0B8iD1oUr/txX35NjcaY6Ns/A==}
+
+  mmdb-lib@2.2.1:
+    resolution: {integrity: sha512-DXO4L9W+08T+A7h5+xdT32l7IMot8z7WOH+7C1Maol571PnktQ8un7Ni4CyPFp4H+vht/FDA5/tpjRvWMFQDMw==}
+    engines: {node: '>=10', npm: '>=6'}
 
   mmdb-lib@3.0.1:
     resolution: {integrity: sha512-dyAyMR+cRykZd1mw5altC9f4vKpCsuywPwo8l/L5fKqDay2zmqT0mF/BvUoXnQiqGn+nceO914rkPKJoyFnGxA==}
@@ -1083,6 +1114,10 @@ packages:
     resolution: {integrity: sha512-ujeqbceABgwMZxEJnk2HDY2DlnUZ+9oEcb1KzTVfYHio0UE6dG71n60d8D2I4qNvleWrrXpmjpt7vZeF1LnMZQ==}
     engines: {node: '>=6'}
 
+  tiny-lru@11.3.4:
+    resolution: {integrity: sha512-UxWEfRKpFCabAf6fkTNdlfSw/RDUJ/4C6i1aLZaDnGF82PERHyYhz5CMCVYXtLt34LbqgfpJ2bjmgGKgxuF/6A==}
+    engines: {node: '>=12'}
+
   tiny-lru@11.4.5:
     resolution: {integrity: sha512-hkcz3FjNJfKXjV4mjQ1OrXSLAehg8Hw+cEZclOVT+5c/cWQWImQ9wolzTjth+dmmDe++p3bme3fTxz6Q4Etsqw==}
     engines: {node: '>=12'}
@@ -1159,6 +1194,9 @@ packages:
     resolution: {integrity: sha512-mplynKqc1C2hTVYxd0PU2xQAc22TI1vShAYGksCCfxbn/dFwnHTNi1bvYsBTkhdUNtGIf5xNOg938rrSSYvS9A==}
     engines: {node: '>= 14.6'}
     hasBin: true
+
+  yauzl@2.10.0:
+    resolution: {integrity: sha512-p4a9I6X6nu6IhoGmBqAcbJy1mlC4j27vEPZX9F4L4/vZT3Lyq1VkFHw/V/PUcB9Buo+DG3iHkT0x3Qya58zc3g==}
 
   yazl@2.5.1:
     resolution: {integrity: sha512-phENi2PLiHnHb6QBVot+dJnaAZ0xosj7p3fWl+znIjBDlnMI2PsZCJZ306BPTFOaHf5qdDEI8x5qFrSOBN5vrw==}
@@ -1419,6 +1457,11 @@ snapshots:
       undici-types: 7.16.0
     optional: true
 
+  '@types/yauzl@2.10.3':
+    dependencies:
+      '@types/node': 24.10.1
+    optional: true
+
   adm-zip@0.5.16: {}
 
   adm-zip@0.6.1: {}
@@ -1546,6 +1589,14 @@ snapshots:
 
   chownr@1.1.4: {}
 
+  clearcote@0.30.0:
+    dependencies:
+      extract-zip: 2.0.1
+      maxmind: 4.3.29
+      playwright-core: 1.60.0
+    transitivePeerDependencies:
+      - supports-color
+
   cli-progress@3.12.0:
     dependencies:
       string-width: 4.2.3
@@ -1626,7 +1677,21 @@ snapshots:
 
   expand-template@2.0.3: {}
 
+  extract-zip@2.0.1:
+    dependencies:
+      debug: 4.4.3
+      get-stream: 5.2.0
+      yauzl: 2.10.0
+    optionalDependencies:
+      '@types/yauzl': 2.10.3
+    transitivePeerDependencies:
+      - supports-color
+
   fd-slicer2@1.2.0:
+    dependencies:
+      pend: 1.2.0
+
+  fd-slicer@1.1.0:
     dependencies:
       pend: 1.2.0
 
@@ -1684,6 +1749,10 @@ snapshots:
       es-object-atoms: 1.1.1
 
   get-ready@1.0.0: {}
+
+  get-stream@5.2.0:
+    dependencies:
+      pump: 3.0.3
 
   get-stream@9.0.1:
     dependencies:
@@ -1865,6 +1934,11 @@ snapshots:
 
   math-intrinsics@1.1.0: {}
 
+  maxmind@4.3.29:
+    dependencies:
+      mmdb-lib: 2.2.1
+      tiny-lru: 11.3.4
+
   maxmind@5.0.1:
     dependencies:
       mmdb-lib: 3.0.1
@@ -1883,6 +1957,8 @@ snapshots:
   minipass@7.1.2: {}
 
   mkdirp-classic@0.5.3: {}
+
+  mmdb-lib@2.2.1: {}
 
   mmdb-lib@3.0.1: {}
 
@@ -2142,6 +2218,8 @@ snapshots:
       inherits: 2.0.4
       readable-stream: 3.6.2
 
+  tiny-lru@11.3.4: {}
+
   tiny-lru@11.4.5: {}
 
   to-buffer@1.2.2:
@@ -2215,6 +2293,11 @@ snapshots:
   xtend@4.0.2: {}
 
   yaml@2.8.2: {}
+
+  yauzl@2.10.0:
+    dependencies:
+      buffer-crc32: 0.2.13
+      fd-slicer: 1.1.0
 
   yazl@2.5.1:
     dependencies:

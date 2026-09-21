@@ -9,6 +9,7 @@ import { createStrategySelector } from '../strategies/index.js';
 import { executeWithFailover } from '../strategies/failover.js';
 import { normalizeError } from '../utils/error.js';
 import { Worker } from './Worker.js';
+import { browserShareKey } from '../engine/engineContract.js';
 
 /**
  * PoolManager 类 - 管理 Worker 池
@@ -88,12 +89,13 @@ export class PoolManager {
             throw new Error(`登录模式未找到 Worker "${loginWorkerName}"。可用的 Worker: ${availableNames}`);
         }
 
-        // 按 userDataDir 分组
+        // 按 engine + userDataDir 分组（不同引擎绝不共享 profile）
         const browserMap = new Map();
 
         for (const worker of validWorkers) {
             try {
-                const existing = browserMap.get(worker.userDataDir);
+                const shareKey = browserShareKey(worker.userDataDir, worker.engine);
+                const existing = browserMap.get(shareKey);
 
                 if (existing) {
                     const workerProxy = JSON.stringify(worker.proxyConfig || null);
@@ -102,7 +104,7 @@ export class PoolManager {
                         logger.warn('工作池', `[${worker.name}] 代理配置与 [${existing.firstWorkerName}] 不一致，将使用后者的配置`);
                     }
 
-                    logger.debug('工作池', `[${worker.name}] 将与其他 Worker 共享浏览器 (${worker.userDataDir})`);
+                    logger.debug('工作池', `[${worker.name}] 将与其他 Worker 共享浏览器 (${worker.engine} @ ${worker.userDataDir})`);
                     await worker.init(existing.browser);
 
                     // 建立共享关系：设置所有者引用，并添加到所有者的共享列表
@@ -110,9 +112,10 @@ export class PoolManager {
                     existing.ownerWorker._sharedWorkers.push(worker);
                 } else {
                     await worker.init();
-                    browserMap.set(worker.userDataDir, {
+                    browserMap.set(shareKey, {
                         browser: worker.browser,
                         proxyConfig: worker.proxyConfig,
+                        engine: worker.engine,
                         firstWorkerName: worker.name,
                         ownerWorker: worker  // 保存所有者 Worker 引用
                     });

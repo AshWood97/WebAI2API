@@ -30,6 +30,7 @@
 - 🤖 **拟人交互**: 模拟人类打字与鼠标轨迹, 通过特征伪装规避自动化检测
 - 🔄 **接口兼容**: 提供标准 OpenAI 格式接口, 支持流式响应与心跳保活
 - 🚀 **并发隔离**: 支持多窗口并发执行, 可配置独立代理,实现多账号浏览器实例级数据隔离
+- 🧩 **双浏览器基座**: 默认 Camoufox；可选 Clearcote（Chromium，Windows/Linux x64）。`browser.engine` 切换全局默认，`instances[].engine` 可单实例覆盖；profile 目录隔离，适配器不感知基座
 - 🛡️ **稳定防护**: 内置任务队列、负载均衡、故障转移、错误重试等基础功能
 - 🎨 **网页管理**: 提供可视化管理界面, 支持实时日志查看、VNC 连接、适配器管理等
 
@@ -65,7 +66,38 @@
 
 - **Node.js**: v20.0.0+ (ABI 115+)
 - **操作系统**: Windows / Linux / macOS
-- **核心依赖**: Camoufox (安装过程中自动获取)
+- **核心依赖**:
+  - **Camoufox**（默认基座）: 安装过程中自动获取；Windows / Linux / macOS 均可用
+  - **Clearcote**（可选第二基座）: npm `clearcote@0.30.0`；官方发行版当前支持 **Windows x64 / Linux x64**（macOS 仍在 roadmap）
+- Clearcote 使用官方 Node SDK 的 SHA-256 校验缓存，**不引入 PRO 许可证**；免费 GitHub 构建默认同时仅 1 个 Clearcote 浏览器
+
+### 🧩 双浏览器基座速查
+
+```yaml
+browser:
+  engine: camoufox          # 全局默认；clearcote 仅 Windows/Linux x64
+  # path: 仅 Camoufox 可执行文件
+  clearcote:
+    path: ""                # 空=SDK 校验缓存
+    platform: auto          # auto | windows | linux（指纹人格）
+    humanize: true          # 引擎原生拟人；开启时不叠加 ghost-cursor
+    args: []                # 仅 Chromium 参数；容器 --no-sandbox 需显式填写
+
+backend:
+  pool:
+    instances:
+      - name: browser_default
+        # engine 省略=继承 browser.engine；profile: data/camoufoxUserData*
+      - name: browser_chromium
+        engine: clearcote
+        userDataMark: clearcote-main   # profile: data/clearcoteUserData_clearcote-main
+```
+
+- **切换引擎必须重启服务**，不做运行中热切换；OpenAI/Anthropic API 与模型 ID 不变
+- **profile 绝不混用**：不要把 `camoufoxUserData*` 拷到 `clearcoteUserData*`（反之亦然）
+- **macOS**：请保持 `engine: camoufox`；配置 `clearcote` 会在预检/启动时报错，不会假装成功
+- Clearcote 是开源可验证路径，**不保证绕过任何网站风控**；请遵守目标站点条款
+- 双引擎示例与完整字段见 [config.example.yaml](config.example.yaml)；契约测试：`pnpm test:browser-engines`
 
 ### 🛠️ 方式一:手动部署
 
@@ -84,6 +116,13 @@
    # 3. Linux 依赖安装
    # 其他发行版请前往文档中心查找或者自行搜索
    apt install -y xvfb x11vnc libgtk-3-0 libx11-xcb1 libasound2
+
+   # 若使用 Clearcote（Linux x64），额外安装官方 Node 文档要求的运行库
+   # apt install -y xz-utils libnss3 libnspr4 libgbm1 libasound2 libatk1.0-0 \
+   #   libatk-bridge2.0-0 libcups2 libdrm2 libxkbcommon0 libxcomposite1 \
+   #   libxdamage1 libxrandr2 libxfixes3 libxext6 libpango-1.0-0 libcairo2 \
+   #   libx11-6 libxcb1 libexpat1 libdbus-1-3
+   # 容器/无沙箱环境请在 browser.clearcote.args 显式添加 --no-sandbox
    
    ```
 
