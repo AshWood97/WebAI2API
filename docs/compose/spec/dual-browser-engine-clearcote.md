@@ -3,7 +3,7 @@ feature: dual-browser-engine-clearcote
 status: delivered
 updated: 2026-09-21
 branch: feat/dual-browser-engine-clearcote
-commits: 7eade9b4876c8dbb0402e6b51eff8df3fb7506a9..working-tree-uncommitted
+commits: 7eade9b4876c8dbb0402e6b51eff8df3fb7506a9..11a907a0155ae51592c65a5ffaef23ac44aa066a
 ---
 
 # WebAI2API 双浏览器基座：Camoufox + Clearcote
