@@ -240,6 +240,18 @@ export class Worker {
         } else {
             // 非登录模式：注册断开事件，所有者负责重启并同步到共享者
             this.browser.on('close', async () => {
+                // 主动 shutdown 时不得触发重建
+                try {
+                    const { isShuttingDown } = await import('../engine/launcher.js');
+                    if (typeof isShuttingDown === 'function' && isShuttingDown()) {
+                        logger.info('工作池', `[${this.name}] 服务关闭中，忽略浏览器 close 自动恢复`);
+                        this.initialized = false;
+                        this.browser = null;
+                        this.page = null;
+                        return;
+                    }
+                } catch { /* ignore */ }
+
                 logger.warn('工作池', `[${this.name}] 浏览器已断开连接，正在自动重新初始化...`);
 
                 // 标记自己和所有共享者为未初始化
@@ -508,7 +520,30 @@ export class Worker {
      * 重新初始化浏览器（崩溃恢复）
      * @private
      */
-    async _reinit() {
+    _reinit() {
+        // single-flight：并发 close/error 只触发一次重建（非 async，保证同一 Promise）
+        if (this._reinitPromise) {
+            return this._reinitPromise;
+        }
+        this._reinitPromise = this._doReinit().finally(() => {
+            this._reinitPromise = null;
+        });
+        return this._reinitPromise;
+    }
+
+    /**
+     * @private
+     */
+    async _doReinit() {
+        // 服务关闭中禁止重建
+        try {
+            const { isShuttingDown } = await import('../engine/launcher.js');
+            if (typeof isShuttingDown === 'function' && isShuttingDown()) {
+                logger.warn('工作池', `[${this.name}] 服务正在关闭，跳过浏览器重建`);
+                return;
+            }
+        } catch { /* launcher 可加载失败时继续按旧行为 */ }
+
         this.initialized = false;
         this.browser = null;
         this.page = null;

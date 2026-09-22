@@ -7,7 +7,11 @@ import os from 'os';
 import fs from 'fs';
 import path from 'path';
 import { logger } from './logger.js';
-import { isManagedUserDataFolder } from '../backend/engine/engineContract.js';
+import {
+    isManagedUserDataFolder,
+    parseManagedUserDataFolder,
+    resolveManagedUserDataPath
+} from '../backend/engine/engineContract.js';
 
 // 服务启动时间
 const startTime = Date.now();
@@ -119,7 +123,8 @@ export function getDataFolders(workers = []) {
                 size = getFolderSize(folderPath, 3);
             } catch (e) { /* ignore */ }
 
-            const engine = entry.name.startsWith('clearcoteUserData') ? 'clearcote' : 'camoufox';
+            const parsed = parseManagedUserDataFolder(entry.name);
+            const engine = parsed?.engine || (entry.name.startsWith('clearcoteUserData') ? 'clearcote' : 'camoufox');
             folders.push({
                 name: entry.name,
                 path: `data/${entry.name}`,
@@ -154,9 +159,17 @@ export function deleteDataFolders(folderNames, workers = []) {
     }
 
     for (const name of folderNames) {
-        // 安全检查：只允许 camoufoxUserData* / clearcoteUserData*
+        // 安全检查：精确托管目录名 + canonical 路径边界（拒绝穿越/伪造前缀/越界 symlink）
         if (!isManagedUserDataFolder(name)) {
             errors.push(`${name}: 不允许删除非用户数据文件夹`);
+            continue;
+        }
+
+        let folderPath;
+        try {
+            folderPath = resolveManagedUserDataPath(name, dataDir);
+        } catch (e) {
+            errors.push(`${name}: ${e.message}`);
             continue;
         }
 
@@ -166,15 +179,33 @@ export function deleteDataFolders(folderNames, workers = []) {
             continue;
         }
 
-        const folderPath = path.join(dataDir, name);
-
-        // 检查是否存在
-        if (!fs.existsSync(folderPath)) {
+        // 检查是否存在；拒绝指向 data/ 外的符号链接
+        try {
+            const st = fs.lstatSync(folderPath);
+            if (st.isSymbolicLink()) {
+                let real;
+                try {
+                    real = fs.realpathSync(folderPath);
+                } catch {
+                    errors.push(`${name}: 符号链接无法解析，拒绝删除`);
+                    continue;
+                }
+                const baseReal = fs.realpathSync(dataDir);
+                const rel = path.relative(baseReal, real);
+                if (!rel || rel.startsWith('..') || path.isAbsolute(rel)) {
+                    errors.push(`${name}: 符号链接指向 data/ 之外，拒绝删除`);
+                    continue;
+                }
+            } else if (!st.isDirectory()) {
+                errors.push(`${name}: 不是目录`);
+                continue;
+            }
+        } catch {
             errors.push(`${name}: 文件夹不存在`);
             continue;
         }
 
-        // 删除文件夹
+        // 删除文件夹（仅 canonical 路径；force 不跳出 data/）
         try {
             fs.rmSync(folderPath, { recursive: true, force: true });
             deleted.push(name);

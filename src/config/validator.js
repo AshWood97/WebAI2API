@@ -4,6 +4,10 @@
  */
 
 import { registry } from '../backend/registry.js';
+import {
+    sanitizeClearcoteArgs,
+    validateUserDataMark
+} from '../backend/engine/engineContract.js';
 
 /**
  * 校验 Server 配置
@@ -92,29 +96,59 @@ export function validateBrowserConfig(data) {
     }
 
     // Clearcote 字段校验
-    if (data.clearcote) {
+    if (data.clearcote !== undefined && data.clearcote !== null) {
         const cc = data.clearcote;
-        if (cc.path !== undefined && typeof cc.path !== 'string') {
-            errors.push('clearcote.path 必须是字符串');
-        }
-        if (cc.platform !== undefined && !['auto', 'windows', 'linux'].includes(String(cc.platform).toLowerCase())) {
-            errors.push('clearcote.platform 必须是 auto、windows 或 linux');
-        }
-        if (cc.brand !== undefined && !['Chrome', 'Edge', 'Opera', 'Vivaldi'].includes(cc.brand)) {
-            errors.push('clearcote.brand 必须是 Chrome、Edge、Opera 或 Vivaldi');
-        }
-        if (cc.geoip !== undefined && typeof cc.geoip !== 'boolean') {
-            errors.push('clearcote.geoip 必须是布尔值');
-        }
-        if (cc.humanize !== undefined && typeof cc.humanize !== 'boolean') {
-            errors.push('clearcote.humanize 必须是布尔值');
-        }
-        if (cc.args !== undefined && !Array.isArray(cc.args)) {
-            errors.push('clearcote.args 必须是数组');
-        }
-        for (const forbidden of ['ffVersion', 'camoufox', 'firefox_user_prefs', 'webgl_config']) {
-            if (forbidden in cc) {
-                errors.push(`clearcote 不允许 Firefox/Camoufox 专属字段: ${forbidden}`);
+        if (typeof cc !== 'object' || Array.isArray(cc)) {
+            errors.push('clearcote 必须是对象');
+        } else {
+            if (cc.path !== undefined && typeof cc.path !== 'string') {
+                errors.push('clearcote.path 必须是字符串');
+            }
+            if (cc.platform !== undefined && !['auto', 'windows', 'linux'].includes(String(cc.platform).toLowerCase())) {
+                errors.push('clearcote.platform 必须是 auto、windows 或 linux');
+            }
+            if (cc.brand !== undefined && !['Chrome', 'Edge', 'Opera', 'Vivaldi'].includes(cc.brand)) {
+                errors.push('clearcote.brand 必须是 Chrome、Edge、Opera 或 Vivaldi');
+            }
+            if (cc.geoip !== undefined && typeof cc.geoip !== 'boolean') {
+                errors.push('clearcote.geoip 必须是布尔值');
+            }
+            if (cc.humanize !== undefined && typeof cc.humanize !== 'boolean') {
+                errors.push('clearcote.humanize 必须是布尔值');
+            }
+            if (cc.sandbox !== undefined && typeof cc.sandbox !== 'boolean') {
+                errors.push('clearcote.sandbox 必须是布尔值');
+            }
+            if (cc.allowDetectedLicense !== undefined && typeof cc.allowDetectedLicense !== 'boolean') {
+                errors.push('clearcote.allowDetectedLicense 必须是布尔值');
+            }
+            if (cc.fingerprintProfile !== undefined && typeof cc.fingerprintProfile !== 'string') {
+                errors.push('clearcote.fingerprintProfile 必须是字符串路径');
+            }
+            if (cc.timezone !== undefined && typeof cc.timezone !== 'string') {
+                errors.push('clearcote.timezone 必须是字符串');
+            }
+            if (cc.acceptLanguage !== undefined && typeof cc.acceptLanguage !== 'string') {
+                errors.push('clearcote.acceptLanguage 必须是字符串');
+            }
+            if (cc.webrtcIp !== undefined && typeof cc.webrtcIp !== 'string') {
+                errors.push('clearcote.webrtcIp 必须是字符串');
+            }
+            if (cc.args !== undefined) {
+                if (!Array.isArray(cc.args)) {
+                    errors.push('clearcote.args 必须是字符串数组');
+                } else {
+                    try {
+                        sanitizeClearcoteArgs(cc.args);
+                    } catch (e) {
+                        errors.push(e.message);
+                    }
+                }
+            }
+            for (const forbidden of ['ffVersion', 'camoufox', 'firefox_user_prefs', 'webgl_config']) {
+                if (forbidden in cc) {
+                    errors.push(`clearcote 不允许 Firefox/Camoufox 专属字段: ${forbidden}`);
+                }
             }
         }
     }
@@ -194,12 +228,12 @@ export function validateInstancesConfig(data) {
             }
         }
 
-        // userDataMark 校验（可选，可为空）
+        // userDataMark 校验（可选，可为空）；与 engineContract 共享规则
         if (inst.userDataMark !== undefined && inst.userDataMark !== null && inst.userDataMark !== '') {
-            if (typeof inst.userDataMark !== 'string') {
-                errors.push(`${prefix}: userDataMark 必须是字符串`);
-            } else if (!/^[a-zA-Z0-9_-]+$/.test(inst.userDataMark)) {
-                errors.push(`${prefix}: userDataMark 只能包含字母、数字、下划线和连字符`);
+            try {
+                validateUserDataMark(inst.userDataMark);
+            } catch (e) {
+                errors.push(`${prefix}: ${e.message}`);
             }
         }
 

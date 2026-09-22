@@ -235,8 +235,15 @@ browser:
     humanize: true
     # WebRTC 报告 IP（空=不显式设置；geoip 可自动填充）
     webrtcIp: ""
+    # sandbox：默认 true（安全路径）。false 时才注入 --no-sandbox（降低安全性）。
+    # 不要在 args 里手写 --no-sandbox；root/容器请优先给 chrome-sandbox 设置 setuid。
+    sandbox: true
+    # 免费模式默认拒绝自动使用 PRO/license。
+    # 若环境存在 CLEARCOTE_LICENSE_KEY 或 ~/.clearcote/license.key，启动会被拒绝；
+    # 设为 true 表示显式接受检测到的 license（不读取/打印 key）。
+    allowDetectedLicense: false
     # 仅 Clearcote/Chromium 参数；不会自动继承 Firefox/Camoufox 参数
-    # 容器内如需 --no-sandbox，请在此显式添加，项目不会偷偷降低安全边界
+    # 每行/每项一个参数；--disable-features=A,B 整段保留，不要按逗号拆开
     args: []
 
   # 站点隔离 (fission.autostart)

@@ -33,6 +33,8 @@ const formData = reactive({
         geoip: true,
         humanize: true,
         webrtcIp: '',
+        sandbox: true,
+        allowDetectedLicense: false,
         argsText: ''
     },
     // CSS 性能优化
@@ -50,7 +52,7 @@ const formData = reactive({
 });
 
 const parsePathList = (text) => (text || '')
-    .split(/\n|,/)
+    .split('\n')
     .map(s => s.trim())
     .filter(Boolean);
 
@@ -84,6 +86,8 @@ onMounted(async () => {
     formData.clearcote.geoip = cc.geoip !== false;
     formData.clearcote.humanize = cc.humanize !== false;
     formData.clearcote.webrtcIp = cc.webrtcIp || '';
+    formData.clearcote.sandbox = cc.sandbox !== false;
+    formData.clearcote.allowDetectedLicense = cc.allowDetectedLicense === true;
     formData.clearcote.argsText = (cc.args || []).join('\n');
 
     if (cfg.cssInject) {
@@ -143,6 +147,8 @@ const handleSave = async () => {
             geoip: formData.clearcote.geoip !== false,
             humanize: formData.clearcote.humanize !== false,
             webrtcIp: formData.clearcote.webrtcIp || '',
+            sandbox: formData.clearcote.sandbox !== false,
+            allowDetectedLicense: formData.clearcote.allowDetectedLicense === true,
             args: clearcoteArgs
         },
         proxy: {
@@ -307,7 +313,7 @@ const handleSave = async () => {
                 </a-row>
                 <a-row :gutter="16">
                     <a-col :span="8">
-                        <a-form-item label="fingerprintProfile 文件路径（空=用持久 seed）">
+                        <a-form-item label="fingerprintProfile 文件路径（空=用持久 seed；配置后与 seed 互斥）">
                             <a-input v-model:value="formData.clearcote.fingerprintProfile" />
                         </a-form-item>
                     </a-col>
@@ -321,7 +327,19 @@ const handleSave = async () => {
                             <a-switch v-model:checked="formData.clearcote.humanize" />
                         </a-form-item>
                     </a-col>
+                    <a-col :span="4">
+                        <a-form-item label="sandbox（关闭降安全）">
+                            <a-switch v-model:checked="formData.clearcote.sandbox" />
+                        </a-form-item>
+                    </a-col>
+                    <a-col :span="4">
+                        <a-form-item label="允许检测到的 license">
+                            <a-switch v-model:checked="formData.clearcote.allowDetectedLicense" />
+                        </a-form-item>
+                    </a-col>
                 </a-row>
+                <a-alert type="warning" show-icon style="margin-bottom: 12px"
+                    description="sandbox 关闭后仅通过开关注入 --no-sandbox，请勿在 args 手写。免费模式默认拒绝自动 PRO/license；fingerprintProfile 与持久 seed 互斥。args 请每行一个参数，逗号属于参数本身（如 --disable-features=A,B）。" />
                 <a-form-item label="Clearcote/Chromium 额外 args（每行一个；不继承 Firefox 参数）">
                     <a-textarea v-model:value="formData.clearcote.argsText" :rows="3"
                         placeholder="--disable-gpu" />

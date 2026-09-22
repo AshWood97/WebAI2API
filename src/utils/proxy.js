@@ -50,6 +50,7 @@ export async function getHttpProxy(proxyConfig) {
     }
 
     const { type, host, port } = proxyConfig;
+    assertProxyCredentialsPair(proxyConfig);
     const originalUrl = buildProxyUrl(proxyConfig);
 
     // 如果是 HTTP 代理，直接返回
@@ -116,20 +117,44 @@ export async function getBrowserProxy(proxyConfig) {
 }
 
 /**
- * 获取 Clearcote/Playwright 标准代理对象
- * - HTTP：拆出 server/username/password
- * - SOCKS5 无认证：直接 socks5://
- * - SOCKS5 带认证：复用 proxy-chain relay（Chromium 无法原生认证 SOCKS5，禁止静默丢密码）
+ * 校验代理凭据成对出现（禁止半截凭据静默变成无认证）
+ * @param {object} proxyConfig
+ */
+function assertProxyCredentialsPair(proxyConfig) {
+    const { user, passwd } = proxyConfig;
+    const hasUser = !!(user && String(user).length);
+    const hasPass = !!(passwd && String(passwd).length);
+    if (hasUser !== hasPass) {
+        throw new Error('代理用户名与密码必须成对提供，拒绝半截凭据');
+    }
+    return hasUser && hasPass;
+}
+
+/**
+ * 获取 Clearcote/Playwright 标准代理对象（无 handle，兼容旧调用）
  * @param {object} proxyConfig
  * @returns {Promise<object|null>}
  */
 export async function getClearcoteProxy(proxyConfig) {
+    const handle = await acquireClearcoteProxy(proxyConfig);
+    return handle ? handle.proxy : null;
+}
+
+/**
+ * 获取 Clearcote 代理并返回可释放 handle（relay 生命周期绑定）
+ * - HTTP：拆出 server/username/password
+ * - SOCKS5 无认证：直接 socks5://
+ * - SOCKS5 带认证：proxy-chain relay（Chromium/SDK 无法原生认证 SOCKS5，禁止静默丢密码）
+ * @param {object} proxyConfig
+ * @returns {Promise<{proxy: object, relayUrl: string|null, released: boolean}|null>}
+ */
+export async function acquireClearcoteProxy(proxyConfig) {
     if (!proxyConfig || !proxyConfig.enable) {
         return null;
     }
 
     const { type, host, port, user, passwd } = proxyConfig;
-    const hasAuth = !!(user || passwd);
+    const hasAuth = assertProxyCredentialsPair(proxyConfig);
 
     if (type === 'socks5' && hasAuth) {
         logger.info('代理器', 'Clearcote: SOCKS5 带认证，通过本地 relay 转换为 HTTP 代理（不会静默丢弃密码）');
@@ -137,22 +162,48 @@ export async function getClearcoteProxy(proxyConfig) {
         if (!httpProxyUrl) {
             throw new Error('Clearcote SOCKS5 认证代理 relay 创建失败');
         }
-        return { server: httpProxyUrl };
+        return {
+            proxy: { server: httpProxyUrl },
+            relayUrl: httpProxyUrl,
+            released: false
+        };
     }
 
     if (type === 'socks5') {
-        return { server: `socks5://${host}:${port}` };
+        return {
+            proxy: { server: `socks5://${host}:${port}` },
+            relayUrl: null,
+            released: false
+        };
     }
 
     const server = `http://${host}:${port}`;
-    if (hasAuth) {
-        return { server, username: user, password: passwd };
-    }
-    return { server };
+    const proxy = hasAuth
+        ? { server, username: user, password: passwd }
+        : { server };
+    return { proxy, relayUrl: null, released: false };
 }
 
 /**
- * 清理代理资源
+ * 释放单个代理 handle（幂等）
+ * @param {{relayUrl?: string|null, released?: boolean}} handle
+ */
+export async function releaseProxyHandle(handle) {
+    if (!handle || handle.released) return;
+    handle.released = true;
+    if (!handle.relayUrl) return;
+    proxyState.anonymizedProxies.delete(handle.relayUrl);
+    try {
+        logger.debug('代理器', '正在关闭本地代理桥接...');
+        await closeAnonymizedProxy(handle.relayUrl, true);
+        logger.debug('代理器', '本地代理桥接已关闭');
+    } catch (error) {
+        logger.error('代理器', `关闭本地代理桥接失败: ${error.message}`);
+    }
+}
+
+/**
+ * 清理代理资源（幂等；单步失败不阻塞其余）
  * 关闭由 proxy-chain 创建的本地代理服务器
  */
 export async function cleanupProxy() {

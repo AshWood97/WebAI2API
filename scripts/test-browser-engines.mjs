@@ -115,7 +115,7 @@ console.log('\n[3] referenced engines + preflight filter');
 console.log('\n[4] platform gate (macOS UNVERIFIED path)');
 {
     let macErr = null;
-    try { assertClearcoteHostSupported('darwin'); } catch (e) { macErr = e.message; }
+    try { assertClearcoteHostSupported('darwin', 'arm64'); } catch (e) { macErr = e.message; }
     assert('darwin host rejected', !!macErr && macErr.includes('macOS'));
     assert('error mentions camoufox alternative', !!macErr && macErr.includes('camoufox'));
     assert(
@@ -124,15 +124,15 @@ console.log('\n[4] platform gate (macOS UNVERIFIED path)');
     );
 
     let threw = false;
-    try { assertClearcoteHostSupported('linux'); } catch { threw = true; }
+    try { assertClearcoteHostSupported('linux', 'x64'); } catch { threw = true; }
     assert('linux host allowed', !threw);
     threw = false;
-    try { assertClearcoteHostSupported('win32'); } catch { threw = true; }
+    try { assertClearcoteHostSupported('win32', 'x64'); } catch { threw = true; }
     assert('win32 host allowed', !threw);
 
-    assert('auto platform linux', resolveClearcoteFingerprintPlatform('auto', 'linux') === 'linux');
-    assert('auto platform windows', resolveClearcoteFingerprintPlatform('auto', 'win32') === 'windows');
-    assert('explicit persona on linux host', resolveClearcoteFingerprintPlatform('windows', 'linux') === 'windows');
+    assert('auto platform linux', resolveClearcoteFingerprintPlatform('auto', 'linux', 'x64') === 'linux');
+    assert('auto platform windows', resolveClearcoteFingerprintPlatform('auto', 'win32', 'x64') === 'windows');
+    assert('explicit persona on linux host', resolveClearcoteFingerprintPlatform('windows', 'linux', 'x64') === 'windows');
 
     const macPreflight = preflightClearcote({ platform: 'auto' }, 'darwin');
     assert('preflight clearcote on darwin errors', macPreflight.length > 0 && macPreflight[0].includes('macOS'));
@@ -182,6 +182,7 @@ console.log('\n[5] seed persistence + launch options isolation');
         headless: true,
         proxy: { server: 'http://127.0.0.1:7890' },
         hostPlatform: 'linux',
+        hostArch: 'x64',
         explicitSeed: seed1
     });
 

@@ -19,7 +19,7 @@ import os from 'os';
 import { createCursor } from 'ghost-cursor-playwright-port';
 import { getRealViewport, clamp, random, sleep } from './utils.js';
 import { logger } from '../../utils/logger.js';
-import { getBrowserProxy, getClearcoteProxy, cleanupProxy } from '../../utils/proxy.js';
+import { getBrowserProxy, acquireClearcoteProxy, releaseProxyHandle, cleanupProxy } from '../../utils/proxy.js';
 import { PROJECT_CAMOUFOX_DIR } from './camoufoxEnv.js';
 import {
     readCamoufoxVersion,
@@ -36,7 +36,9 @@ import {
 import {
     importClearcoteSdk,
     buildClearcoteRuntimeMeta,
-    readClearcoteSdkVersion
+    readClearcoteSdkVersion,
+    resolveLicenseBoundary,
+    readClearcoteReleaseInfo
 } from './clearcoteMeta.js';
 
 // 全局状态：跟踪全部活动 context（两种引擎）
@@ -44,12 +46,28 @@ const activeContexts = new Set();
 let globalBrowserProcess = null;
 let globalContext = null; // 最近一次启动的 context（兼容旧逻辑）
 
+/** 显式生命周期：stopping 后禁止 close handler 自动恢复 */
+const lifecycle = { stopping: false, stopped: false };
+
+/**
+ * 是否处于关闭/已关闭状态（Worker 据此禁止 _reinit）
+ * @returns {boolean}
+ */
+export function isShuttingDown() {
+    return lifecycle.stopping || lifecycle.stopped;
+}
+
 /**
  * 清理浏览器资源和进程
  * 实现三级退出机制: Playwright close -> SIGTERM -> SIGKILL
+ * 幂等；开始后禁止 close handler 重建 context
  * @returns {Promise<void>}
  */
 export async function cleanup() {
+    lifecycle.stopping = true;
+    if (lifecycle.stopped && activeContexts.size === 0 && !globalBrowserProcess) {
+        return;
+    }
 
     // Level 1: 通过 Playwright 协议优雅关闭全部 Context（Camoufox + Clearcote）
     const contexts = [...activeContexts];
@@ -95,8 +113,15 @@ export async function cleanup() {
         logger.info('浏览器', '浏览器进程已终止');
     }
 
-    // 清理代理
-    await cleanupProxy();
+    // 清理代理（幂等；单步失败不阻塞）
+    try {
+        await cleanupProxy();
+    } catch (e) {
+        logger.warn('浏览器', `清理代理失败: ${e.message}`);
+    }
+
+    lifecycle.stopped = true;
+    lifecycle.stopping = true;
 }
 
 // 防止重复注册
@@ -489,6 +514,9 @@ async function launchCamoufoxBase({ config, userDataDir, proxyConfig, markLabel,
         camoufoxLaunchOptions.proxy = proxyObj;
     }
 
+    if (isShuttingDown()) {
+        throw new Error('服务正在关闭，取消启动浏览器');
+    }
     const context = await Camoufox(camoufoxLaunchOptions);
     trackContext(context, markLabel);
 
@@ -534,52 +562,113 @@ async function launchCamoufoxBase({ config, userDataDir, proxyConfig, markLabel,
  * @private
  */
 async function launchClearcoteBase({ config, userDataDir, proxyConfig, markLabel, headlessMode, engine }) {
+    if (isShuttingDown()) {
+        throw new Error('服务正在关闭，取消启动 Clearcote');
+    }
     const browserConfig = config?.browser || {};
+    const clearcoteCfg = browserConfig.clearcote || {};
     const clearcoteSdk = await importClearcoteSdk();
     if (typeof clearcoteSdk.launchPersistentContext !== 'function') {
         throw new Error('clearcote SDK 未导出 launchPersistentContext，请安装已核验版本 0.30.0');
     }
 
-    const proxyObj = await getClearcoteProxy(proxyConfig);
-    const launchOptions = buildClearcoteLaunchOptions({
-        browserConfig,
-        userDataDir,
-        headless: headlessMode,
-        proxy: proxyObj,
-        hostPlatform: os.platform()
-    });
+    // 免费/PRO 边界：检测到 license 且未显式允许则拒绝
+    const licenseBoundary = resolveLicenseBoundary(clearcoteCfg);
 
-    const context = await clearcoteSdk.launchPersistentContext(userDataDir, launchOptions);
-    trackContext(context, markLabel);
+    const proxyHandle = await acquireClearcoteProxy(proxyConfig);
+    let context = null;
+    try {
+        const launchOptions = buildClearcoteLaunchOptions({
+            browserConfig,
+            userDataDir,
+            headless: headlessMode,
+            proxy: proxyHandle?.proxy || null,
+            hostPlatform: os.platform(),
+            hostArch: os.arch()
+        });
+        // 从最终 options 剥离内部 meta（SDK 不识别）
+        const { __meta: launchMeta, ...sdkOptions } = launchOptions;
 
-    const statusParts = [];
-    statusParts.push(`无头模式: ${headlessMode ? '是' : '否'}`);
-    statusParts.push(`Clearcote SDK: ${readClearcoteSdkVersion() || 'unknown'}`);
-    statusParts.push(`platform: ${launchOptions.platform}`);
-    statusParts.push(launchOptions.executablePath ? 'binary: explicit' : 'binary: sdk-resolve');
-    if (proxyObj) statusParts.push('代理: 已配置');
-    if (launchOptions.humanize) statusParts.push('内核拟人轨迹: 开');
-    logger.info('浏览器', `[${markLabel}] Clearcote 浏览器已启动 (${statusParts.join(', ')})`);
+        context = await clearcoteSdk.launchPersistentContext(userDataDir, sdkOptions);
+        trackContext(context, markLabel);
+        if (proxyHandle) {
+            bindProxyReleaseToContext(context, proxyHandle);
+        }
 
-    registerCleanupHandlers();
+        let browserVersion = null;
+        try {
+            const browser = context.browser?.() || null;
+            if (browser && typeof browser.version === 'function') {
+                browserVersion = browser.version();
+            }
+        } catch { /* external binary may not expose version */ }
 
-    const page = await resolveInitialPage(context);
-    await maybeInjectCss(context, browserConfig, markLabel);
+        const statusParts = [];
+        statusParts.push(`无头模式: ${headlessMode ? '是' : '否'}`);
+        statusParts.push(`Clearcote SDK: ${readClearcoteSdkVersion() || 'unknown'}`);
+        if (browserVersion) statusParts.push(`browser: ${browserVersion}`);
+        statusParts.push(`platform: ${sdkOptions.platform}`);
+        statusParts.push(sdkOptions.executablePath ? 'binary: explicit' : 'binary: sdk-resolve');
+        statusParts.push(`sandbox: ${launchMeta?.sandboxEnabled === false ? 'DISABLED' : 'on'}`);
+        statusParts.push(`license: ${licenseBoundary.status}`);
+        if (proxyHandle?.proxy) statusParts.push('代理: 已配置');
+        if (sdkOptions.humanize) statusParts.push('内核拟人轨迹: 开');
+        logger.info('浏览器', `[${markLabel}] Clearcote 浏览器已启动 (${statusParts.join(', ')})`);
+        if (launchMeta?.sandboxExplicitlyDisabled) {
+            logger.warn('浏览器', `[${markLabel}] sandbox 已显式关闭（降低安全性）`);
+        }
 
-    const runtime = buildClearcoteRuntimeMeta({
-        hostPlatform: os.platform(),
-        executablePath: launchOptions.executablePath || null,
-        fingerprintPlatform: launchOptions.platform,
-        seedSource: 'profile-persistent'
-    });
-    runtime.userDataDir = userDataDir;
-    runtime.capabilities = {
-        ...runtime.capabilities,
-        nativeHumanize: launchOptions.humanize === true,
-        geoip: launchOptions.geoip !== false
+        registerCleanupHandlers();
+
+        const page = await resolveInitialPage(context);
+        await maybeInjectCss(context, browserConfig, markLabel);
+
+        const runtime = buildClearcoteRuntimeMeta({
+            hostPlatform: os.platform(),
+            executablePath: sdkOptions.executablePath || null,
+            fingerprintPlatform: sdkOptions.platform,
+            fingerprintSource: launchMeta?.fingerprintSource || 'none',
+            browserVersion: browserVersion || null,
+            releaseInfo: readClearcoteReleaseInfo(clearcoteSdk),
+            licenseStatus: licenseBoundary.status,
+            licenseSource: licenseBoundary.source,
+            sandboxEnabled: launchMeta?.sandboxEnabled !== false,
+            sdkModule: clearcoteSdk
+        });
+        runtime.userDataDir = userDataDir;
+        runtime.capabilities = {
+            ...runtime.capabilities,
+            nativeHumanize: sdkOptions.humanize === true,
+            geoip: sdkOptions.geoip !== false,
+            sandboxEnabled: launchMeta?.sandboxEnabled !== false
+        };
+
+        return { context, page, engine, runtime };
+    } catch (e) {
+        // 启动失败立即释放 relay
+        if (proxyHandle) {
+            try { await releaseProxyHandle(proxyHandle); } catch { /* ignore */ }
+        }
+        if (context) {
+            try { await context.close(); } catch { /* ignore */ }
+        }
+        throw e;
+    }
+}
+
+/**
+ * 将 proxy relay 生命周期绑定到 context close
+ * @param {object} context
+ * @param {object} proxyHandle
+ */
+function bindProxyReleaseToContext(context, proxyHandle) {
+    if (!context || typeof context.on !== 'function') return;
+    const release = () => {
+        releaseProxyHandle(proxyHandle).catch((e) => {
+            logger.warn('代理器', `释放代理 relay 失败: ${e.message}`);
+        });
     };
-
-    return { context, page, engine, runtime };
+    context.on('close', release);
 }
 
 // 导出工具函数供 pool.js 使用

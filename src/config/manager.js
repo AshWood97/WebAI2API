@@ -111,6 +111,8 @@ export function getBrowserConfig() {
             geoip: browser.clearcote?.geoip !== false,
             humanize: browser.clearcote?.humanize !== false,
             webrtcIp: browser.clearcote?.webrtcIp ?? '',
+            sandbox: browser.clearcote?.sandbox !== false,
+            allowDetectedLicense: browser.clearcote?.allowDetectedLicense === true,
             args: browser.clearcote?.args ?? []
         },
         cssInject: {
@@ -157,6 +159,8 @@ export function saveBrowserConfig(data) {
         if (cc.geoip !== undefined) config.browser.clearcote.geoip = cc.geoip;
         if (cc.humanize !== undefined) config.browser.clearcote.humanize = cc.humanize;
         if (cc.webrtcIp !== undefined) config.browser.clearcote.webrtcIp = cc.webrtcIp;
+        if (cc.sandbox !== undefined) config.browser.clearcote.sandbox = cc.sandbox !== false;
+        if (cc.allowDetectedLicense !== undefined) config.browser.clearcote.allowDetectedLicense = cc.allowDetectedLicense === true;
         if (cc.args !== undefined) config.browser.clearcote.args = Array.isArray(cc.args) ? cc.args : [];
     }
     if (data.camoufox) {

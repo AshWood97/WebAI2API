@@ -1,65 +1,95 @@
-VERDICT: IMPLEMENTED_WITH_UNVERIFIED_CLEARCOTE_LAUNCH
+VERDICT: PASS_WITH_UNVERIFIED_E2E
 
-feature: dual-browser-engine-clearcote
+feature: dual-browser-engine-clearcote-followup-hardening
 branch: feat/dual-browser-engine-clearcote
 worktree: /Users/a1-6/AI-Coding/WebAI2API/.worktrees/dual-browser-engine-clearcote
-base_sha: 7eade9b4876c8dbb0402e6b51eff8df3fb7506a9
-head: working tree (uncommitted; commit requires user authorization)
+base_sha: 217ec656c2729eef6851dd2d58b36ce70db47d21
+head_sha: (see feature branch HEAD at delivery; working tree clean after finalize commit)
 executor: MiMo compose-next (single implementer in isolated worktree)
 sdk_pin: clearcote@0.30.0
+prior_review_target: feat/dual-browser-engine-clearcote@217ec656c2729eef6851dd2d58b36ce70db47d21
 
-## Modified / added files
+## Corrected stale claims
 
-- package.json, pnpm-lock.yaml, pnpm-workspace.yaml (pin clearcote@0.30.0; allowBuilds)
-- src/backend/engine/engineContract.js (new)
-- src/backend/engine/clearcoteMeta.js (new)
-- src/backend/engine/launcher.js (dispatch + context Set)
-- src/backend/pool/Worker.js, PoolManager.js
-- src/config/index.js, manager.js, validator.js
-- src/server/preflight.js, server.js, api/openai/routes.js
-- src/utils/proxy.js, systemInfo.js
-- webui browser.vue / workers.vue / dash.vue + dist
-- config.example.yaml, README.md, README_EN.md, CHANGELOG.md, Dockerfile
-- scripts/test-browser-engines.mjs (new)
-- docs/compose/spec/dual-browser-engine-clearcote.md (new)
+- Previous report.md said `head: working tree (uncommitted)`. That was already false at the dual-browser delivery commit `217ec65` (branch clean). This follow-up is committed on `feat/dual-browser-engine-clearcote` and is **not** left as an uncommitted working tree.
+- SDK package version `0.30.0` is **not** the browser version. Browser version comes from `RELEASE.version` (149.0.7827.114) or `browser.version()` after launch.
 
-## Commands / exit codes
+## Changed paths (follow-up hardening)
 
-| Command | Exit | Result |
-|---------|------|--------|
-| pnpm install --frozen-lockfile | 0 | lockfile includes clearcote@0.30.0 |
-| node --check launcher/Worker/PoolManager | 0 | PASS |
+- src/backend/engine/engineContract.js — mark/path safety, seed atomicity, fingerprint mutex, sandbox args
+- src/backend/engine/clearcoteMeta.js — license boundary, browser vs sdk version, preflight arch/regular-file
+- src/backend/engine/launcher.js — stopping/stopped lifecycle, proxy handle release, license/sandbox status
+- src/backend/pool/Worker.js — single-flight `_reinit`, skip recovery while shutting down
+- src/utils/proxy.js — credential pair check, acquire/release handle
+- src/utils/systemInfo.js — exact managed folder + symlink-safe delete
+- src/config/index.js, manager.js, validator.js — sandbox/allowDetectedLicense/args/mark validation
+- webui/src/components/settings/browser.vue — args newline-only, sandbox/license toggles
+- config.example.yaml — document sandbox/license/args semantics
+- scripts/test-clearcote-hardening.mjs (new), scripts/test-clearcote-e2e.mjs (new)
+- scripts/test-browser-engines.mjs — pass explicit x64 arch in synthetic linux/win32 cases
+- docs/compose/spec/dual-browser-engine-clearcote-followup-hardening.md (new)
+
+## Commands
+
+| Command | Exit | Observed |
+|---------|------|----------|
+| node --check (engine/config/pool/utils/scripts) | 0 | PASS |
+| node scripts/test-clearcote-hardening.mjs | 0 | 48/48 → 50/50 after T4 cases |
 | node scripts/test-browser-engines.mjs | 0 | 77/77 PASS |
 | node scripts/test-camoufox-upgrade.mjs | 0 | 27/27 PASS |
 | node scripts/test-upgrade.mjs | 0 | 29/29 PASS |
 | node scripts/test-ops-docs.mjs | 0 | 12/12 PASS |
-| pnpm --dir webui build | 0 | vite build PASS; dist contains Clearcote UI strings |
-| preflight engine=clearcote host=linux | 0 errors | SDK package resolved on disk |
-| preflight engine=clearcote host=darwin | n/a | hard error, no Chromium fallback |
+| node scripts/test-clearcote-e2e.mjs | 0 | SKIP + UNVERIFIED (CLEARCOTE_E2E unset / macOS) |
+| launcher cleanup smoke | 0 | isShuttingDown false→true, cleanup idempotent |
 
-## Camoufox evidence
+## observed
 
-- Launch chain preserved (lazy-clearcote only on engine=clearcote).
-- Old profile paths `data/camoufoxUserData*` unchanged when engine=camoufox.
-- Existing upgrade/ops-docs suites green.
-- Local Camoufox binary smoke not re-run in this worktree (camoufox/ assets not installed here); unit suites cover contract/UA/capability assembly.
+- `userDataMark` rejects `../`, absolute paths, spaces, control/space-trim, path separators.
+- `isManagedUserDataFolder` is exact-format only (`clearcoteUserDataEvil` rejected).
+- `resolveUserDataDirForEngine` confines paths under `data/` single-level; same mark → different engine paths.
+- Delete path refuses fake prefixes and out-of-tree symlinks; does not touch files outside `data/`.
+- Corrupt/incomplete seed file is preserved and throws; no silent identity overwrite.
+- `fingerprintProfile` set → launch options have no auto seed; absent → persistent seed.
+- Runtime separates `sdkVersion` / `browserVersion` / `fingerprintSource` / `license.status`.
+- Default launch does not inject `--no-sandbox`; `sandbox: false` does and flags capabilities.
+- License env detection refuses free path unless `allowDetectedLicense: true`.
+- SOCKS5 half credentials rejected; HTTP handle release idempotent; SOCKS5 auth still uses relay (SDK/Chromium cannot natively auth SOCKS5).
+- Worker `_reinit` is single-flight; launcher `cleanup()` sets shutting-down and is idempotent.
 
-## Clearcote evidence
+## unverified
 
-- npm registry verified launchPersistentContext + Windows/Linux x64 + SHA-256 cache + free path.
-- Option builder isolation tests: no firefox_user_prefs / webgl_config / camoufox blob / ffVersion.
-- Persistent seed file `.webai2api-clearcote.json`, high-entropy, profile-scoped.
-- Preflight on supported Linux host: no false “package unresolvable” after ESM path fix.
-- **UNVERIFIED**: real Clearcote browser launch / cookie persistence on Windows/Linux x64.
-- **UNVERIFIED**: macOS Clearcote launch — platform unsupported by design; tests assert hard error.
+- Real Clearcote `launchPersistentContext` on Windows x64 / Linux x64 (macOS host cannot run official SDK).
+- Cookie persistence restart on real Clearcote binary.
+- Dual-engine concurrent isolation under real Clearcote + Camoufox processes.
+- Real SOCKS5 auth success/fail against a live proxy fixture.
+- Root-container chrome-sandbox setuid behavior.
+- Free-tier seat exhaustion behavior under multi Clearcote launch.
 
-## Residual risks
+## p1_findings
 
-1. Free-tier Clearcote concurrency default = 1 concurrent browser (upstream).
-2. First Clearcote start may download verified binary (latency); production should pre-fetch via SDK on supported hosts.
-3. pnpm 11 ignored-builds gate requires allowBuilds for esbuild/core-js (env workaround).
+- Addressed: path traversal / cross-engine delete risk, fingerprint+seed mutex, sandbox explicit policy, free/license auto-discovery refusal, shutdown reinit race.
+
+## security_notes
+
+- profile deletion: exact name + canonical `data/` boundary + symlink realpath check
+- sandbox: default on; disable only via `browser.clearcote.sandbox: false`
+- license/free mode: detect-only, never print/commit keys; refuse unless explicitly allowed
+- proxy credentials: pair-validated; logs never print passwords; sanitizeRuntimeForApi strips them
+
+## e2e_hosts
+
+- linux-x64: UNVERIFIED (no host in this run)
+- windows-x64: UNVERIFIED (no host in this run)
+- macos: preflight rejects Clearcote (observed); real launch unsupported by design
+
+## residual_risks
+
+1. Free-tier Clearcote concurrency default remains 1 concurrent browser (upstream).
+2. First Clearcote start may download verified binary (latency).
+3. SOCKS5 auth still depends on proxy-chain relay lifecycle (not native Chromium auth).
 4. Real-site AI adapters not regression-tested on dual engines without accounts.
 
-## Review
+## next_action
 
-Initial review found critical: ESM `require.resolve('clearcote/package.json')` false-failed Clearcote preflight on Linux/Windows. Fixed to disk path + version pin check; nested runtime sanitize; multi-relay proxy cleanup; tests strengthened to 77/77. Focused re-review PASS — all four fixes verified, no new criticals.
+- Run `CLEARCOTE_E2E=1 node scripts/test-clearcote-e2e.mjs` on Windows x64 and Linux x64 hosts.
+- Decide close action: keep branch / open PR / local merge (compose-next Finish).

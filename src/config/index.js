@@ -17,7 +17,9 @@ import {
     normalizeEngine,
     resolveInstanceEngine,
     resolveUserDataDirForEngine,
-    collectReferencedEngines
+    collectReferencedEngines,
+    sanitizeClearcoteArgs,
+    validateUserDataMark
 } from '../backend/engine/engineContract.js';
 
 // --- 配置文件路径常量 ---
@@ -87,6 +89,7 @@ export function getConfigPath() {
  * @returns {string} 完整的用户数据目录路径
  */
 function resolveUserDataDir(userDataMark, engine = 'camoufox') {
+    // 内部会执行 validateUserDataMark + data/ 边界检查
     return resolveUserDataDirForEngine(userDataMark, engine, path.join(process.cwd(), 'data'));
 }
 
@@ -166,6 +169,7 @@ function flattenInstancesToWorkers(instances, globalProxy, defaultEngine = DEFAU
 
         // 解析 Instance 级配置（engine 决定 profile 目录前缀）
         const engine = resolveInstanceEngine({ browser: { engine: globalEngine } }, instance);
+        validateUserDataMark(instance.userDataMark);
         const userDataDir = resolveUserDataDir(instance.userDataMark, engine);
         const resolvedProxy = resolveProxyConfig(globalProxy, instance.proxy);
 
@@ -278,7 +282,11 @@ export function loadConfig() {
     if (ccCfg.geoip === undefined) ccCfg.geoip = true;
     if (ccCfg.humanize === undefined) ccCfg.humanize = true;
     if (ccCfg.webrtcIp === undefined) ccCfg.webrtcIp = '';
+    if (ccCfg.sandbox === undefined) ccCfg.sandbox = true;
+    if (ccCfg.allowDetectedLicense === undefined) ccCfg.allowDetectedLicense = false;
     if (!Array.isArray(ccCfg.args)) ccCfg.args = [];
+    // 运行时解析阶段也做 args 校验（不只依赖 WebUI）
+    ccCfg.args = sanitizeClearcoteArgs(ccCfg.args);
     if (!['auto', 'windows', 'linux'].includes(String(ccCfg.platform).toLowerCase())) {
         throw new Error(`browser.clearcote.platform 非法: ${ccCfg.platform}（允许: auto | windows | linux）`);
     }
