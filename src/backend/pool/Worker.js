@@ -239,7 +239,13 @@ export class Worker {
             });
         } else {
             // 非登录模式：注册断开事件，所有者负责重启并同步到共享者
-            this.browser.on('close', async () => {
+            // 绑定当前 instance，旧 context 的 close 不得误伤新 context
+            const browserInstance = this.browser;
+            browserInstance.on('close', async () => {
+                // 身份守卫：仅当前仍持有的 instance 才允许恢复
+                if (this.browser !== browserInstance) {
+                    return;
+                }
                 // 主动 shutdown 时不得触发重建
                 if (isShuttingDown()) {
                     logger.info('工作池', `[${this.name}] 服务关闭中，忽略浏览器 close 自动恢复`);
@@ -541,16 +547,23 @@ export class Worker {
         this.initialized = false;
         const oldBrowser = this.browser;
         const oldPage = this.page;
+        // 先断开身份再 close，避免 close handler 把新实例当旧实例重建
         this.browser = null;
         this.page = null;
 
-        // 释放旧 page/context，避免 reinit 泄漏 live context 与 proxy relay
         await this._releaseBrowserResources(oldBrowser, oldPage);
 
-        // 使用保存的参数重新初始化
-        await this._initNewBrowser(this._targetUrl || 'about:blank', this._navigationHandler || null);
-        this.initialized = true;
-        logger.info('工作池', `[${this.name}] 浏览器已成功重新初始化`);
+        try {
+            await this._initNewBrowser(this._targetUrl || 'about:blank', this._navigationHandler || null);
+            this.initialized = true;
+            logger.info('工作池', `[${this.name}] 浏览器已成功重新初始化`);
+        } catch (e) {
+            // 失败不留无主 active 引用
+            this.initialized = false;
+            this.browser = null;
+            this.page = null;
+            throw e;
+        }
     }
 
     /**

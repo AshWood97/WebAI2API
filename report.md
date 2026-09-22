@@ -4,7 +4,7 @@ feature: dual-browser-engine-clearcote-followup-hardening
 branch: feat/dual-browser-engine-clearcote
 worktree: /Users/a1-6/AI-Coding/WebAI2API/.worktrees/dual-browser-engine-clearcote
 base_sha: 217ec656c2729eef6851dd2d58b36ce70db47d21
-head_sha: 23f287ca41025a167d23cd151c3d0f49de2f7c77
+head_sha: 411538b36bf9df88c6a14539dfbdcf960a6eea84
 executor: MiMo compose-next (single implementer in isolated worktree)
 sdk_pin: clearcote@0.30.0
 prior_review_target: feat/dual-browser-engine-clearcote@217ec656c2729eef6851dd2d58b36ce70db47d21

@@ -353,16 +353,20 @@ async function asyncTests() {
     console.log('== T7 concurrent seed create ==');
     try {
         const dir = path.join(tmpdir(), 'profile-conc');
-        // 进程内并发：ensureClearcoteSeed 为同步，用两线程语义模拟同 tick 双调用
-        const s1 = ensureClearcoteSeed(dir);
-        const s2 = ensureClearcoteSeed(dir);
-        assert.strictEqual(s1, s2);
+        // 真并发首建：多个 Promise 同时进入
+        const jobs = [];
+        for (let i = 0; i < 8; i++) {
+            jobs.push(Promise.resolve().then(() => ensureClearcoteSeed(dir)));
+        }
+        const seeds = await Promise.all(jobs);
+        assert.ok(seeds.every((s) => s === seeds[0]), 'concurrent first-create must yield one seed');
+
         // 模拟锁被占用超时：预置锁目录且无 seed
         const dir2 = path.join(tmpdir(), 'profile-locked');
         fs.mkdirSync(path.join(dir2, '.webai2api-clearcote.lock'), { recursive: true });
         assert.throws(() => ensureClearcoteSeed(dir2), /锁超时|无锁|并发/);
         passed++;
-        console.log('  ok  seed lock timeout refuses unlocked write');
+        console.log('  ok  seed concurrent first-create single identity');
     } catch (e) {
         failed++;
         console.error('  FAIL seed concurrency: ' + e.message);
@@ -411,62 +415,101 @@ async function asyncTests() {
     }
 
     try {
-        // 本地 SOCKS5 认证 fixture：成功/失败
+        // 本地 SOCKS5 认证 fixture：必须经 relay 发起请求才能覆盖成功/失败
         const net = await import('net');
-        const { once } = await import('events');
+        const http = await import('http');
 
         function startSocks5(user, pass) {
             return new Promise((resolve) => {
                 const server = net.createServer((sock) => {
-                    sock.once('data', (buf) => {
-                        // methods: prefer user/pass 0x02
-                        sock.write(Buffer.from([0x05, 0x02]));
-                        sock.once('data', (authBuf) => {
-                            const ulen = authBuf[1];
-                            const u = authBuf.slice(2, 2 + ulen).toString();
-                            const plen = authBuf[2 + ulen];
-                            const p = authBuf.slice(3 + ulen, 3 + ulen + plen).toString();
-                            if (u === user && p === pass) {
-                                sock.write(Buffer.from([0x01, 0x00]));
-                                // 极简：认证后立刻结束（relay 建立连接即可视为认证成功）
-                                sock.end();
-                            } else {
-                                sock.write(Buffer.from([0x01, 0x01]));
+                    let stage = 0;
+                    sock.on('error', () => {});
+                    sock.on('data', (buf) => {
+                        try {
+                            if (sock.writableEnded || sock.destroyed) return;
+                            if (stage === 0) {
+                                stage = 1;
+                                sock.write(Buffer.from([0x05, 0x02]));
+                                return;
+                            }
+                            if (stage === 1) {
+                                stage = 2;
+                                const ulen = buf[1] || 0;
+                                const u = buf.slice(2, 2 + ulen).toString();
+                                const plen = buf[2 + ulen] || 0;
+                                const p = buf.slice(3 + ulen, 3 + ulen + plen).toString();
+                                if (u === user && p === pass) {
+                                    sock.write(Buffer.from([0x01, 0x00]));
+                                } else {
+                                    sock.write(Buffer.from([0x01, 0x01]));
+                                    sock.end();
+                                }
+                                return;
+                            }
+                            if (stage === 2) {
+                                stage = 3;
+                                sock.write(Buffer.from([0x05, 0x00, 0x00, 0x01, 0, 0, 0, 0, 0, 0]));
+                                sock.write('HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nok');
                                 sock.end();
                             }
-                        });
+                        } catch { /* ignore fixture races */ }
                     });
                 });
                 server.listen(0, '127.0.0.1', () => resolve(server));
             });
         }
 
+        function httpViaRelay(proxyServer) {
+            const u = new URL(proxyServer);
+            return new Promise((resolve, reject) => {
+                const req = http.request({
+                    host: u.hostname,
+                    port: u.port,
+                    method: 'GET',
+                    path: 'http://fixture.test/',
+                    headers: { Host: 'fixture.test' },
+                    timeout: 4000
+                }, (res) => {
+                    res.resume();
+                    resolve(res.statusCode);
+                });
+                req.on('error', reject);
+                req.on('timeout', () => req.destroy(new Error('timeout')));
+                req.end();
+            });
+        }
+
         const okSrv = await startSocks5('alice', 'secret');
-        const okPort = okSrv.address().port;
         const handle = await acquireClearcoteProxy({
-            enable: true, type: 'socks5', host: '127.0.0.1', port: okPort,
+            enable: true, type: 'socks5', host: '127.0.0.1', port: okSrv.address().port,
             user: 'alice', passwd: 'secret'
         });
-        assert.ok(handle && handle.proxy && handle.proxy.server.startsWith('http://127.0.0.1:'));
         assert.ok(handle.relayUrl, 'auth socks5 must use relay');
+        const okStatus = await httpViaRelay(handle.proxy.server);
+        assert.ok(okStatus >= 200 && okStatus < 500, 'auth success should yield response, got ' + okStatus);
         await releaseProxyHandle(handle);
         okSrv.close();
         passed++;
-        console.log('  ok  SOCKS5 auth relay created (success path)');
+        console.log('  ok  SOCKS5 auth success via relay request');
 
         const badSrv = await startSocks5('alice', 'secret');
-        const badPort = badSrv.address().port;
-        // 错误凭据：relay 建立可能成功，但上游认证失败应可观测；至少不应静默变无认证
         const handleBad = await acquireClearcoteProxy({
-            enable: true, type: 'socks5', host: '127.0.0.1', port: badPort,
+            enable: true, type: 'socks5', host: '127.0.0.1', port: badSrv.address().port,
             user: 'alice', passwd: 'wrong'
         });
-        assert.ok(handleBad.relayUrl, 'still creates relay for bad creds (fails at use time)');
-        // 释放后不再残留
+        assert.ok(handleBad.relayUrl, 'bad creds still create relay');
+        let failedUpstream = false;
+        try {
+            const st = await httpViaRelay(handleBad.proxy.server);
+            if (st >= 500) failedUpstream = true;
+        } catch {
+            failedUpstream = true;
+        }
+        assert.ok(failedUpstream, 'bad SOCKS5 credentials must fail observably');
         await releaseProxyHandle(handleBad);
         badSrv.close();
         passed++;
-        console.log('  ok  SOCKS5 bad-creds still requires auth relay (not dropped)');
+        console.log('  ok  SOCKS5 auth failure observable via relay');
     } catch (e) {
         failed++;
         console.error('  FAIL SOCKS5 auth fixture: ' + e.message);
