@@ -65,9 +65,25 @@ export function isShuttingDown() {
  */
 export async function cleanup() {
     lifecycle.stopping = true;
+    if (lifecycle.cleanupPromise) {
+        return lifecycle.cleanupPromise;
+    }
     if (lifecycle.stopped && activeContexts.size === 0 && !globalBrowserProcess) {
         return;
     }
+    lifecycle.cleanupPromise = doCleanup().finally(() => {
+        lifecycle.cleanupPromise = null;
+        lifecycle.stopped = true;
+        lifecycle.stopping = true;
+    });
+    return lifecycle.cleanupPromise;
+}
+
+/**
+ * @returns {Promise<void>}
+ */
+async function doCleanup() {
+    lifecycle.stopping = true;
 
     // Level 1: 通过 Playwright 协议优雅关闭全部 Context（Camoufox + Clearcote）
     const contexts = [...activeContexts];

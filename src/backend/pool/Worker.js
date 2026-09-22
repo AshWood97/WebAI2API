@@ -5,7 +5,7 @@
 
 import fs from 'fs';
 import { logger } from '../../utils/logger.js';
-import { initBrowserBase, createCursor, shouldUseGhostCursor } from '../engine/launcher.js';
+import { initBrowserBase, createCursor, shouldUseGhostCursor, isShuttingDown } from '../engine/launcher.js';
 import { normalizeEngine } from '../engine/engineContract.js';
 import { registry } from '../registry.js';
 import { tryGotoWithCheck } from '../utils/page.js';
@@ -241,16 +241,13 @@ export class Worker {
             // 非登录模式：注册断开事件，所有者负责重启并同步到共享者
             this.browser.on('close', async () => {
                 // 主动 shutdown 时不得触发重建
-                try {
-                    const { isShuttingDown } = await import('../engine/launcher.js');
-                    if (typeof isShuttingDown === 'function' && isShuttingDown()) {
-                        logger.info('工作池', `[${this.name}] 服务关闭中，忽略浏览器 close 自动恢复`);
-                        this.initialized = false;
-                        this.browser = null;
-                        this.page = null;
-                        return;
-                    }
-                } catch { /* ignore */ }
+                if (isShuttingDown()) {
+                    logger.info('工作池', `[${this.name}] 服务关闭中，忽略浏览器 close 自动恢复`);
+                    this.initialized = false;
+                    this.browser = null;
+                    this.page = null;
+                    return;
+                }
 
                 logger.warn('工作池', `[${this.name}] 浏览器已断开连接，正在自动重新初始化...`);
 
@@ -536,22 +533,46 @@ export class Worker {
      */
     async _doReinit() {
         // 服务关闭中禁止重建
-        try {
-            const { isShuttingDown } = await import('../engine/launcher.js');
-            if (typeof isShuttingDown === 'function' && isShuttingDown()) {
-                logger.warn('工作池', `[${this.name}] 服务正在关闭，跳过浏览器重建`);
-                return;
-            }
-        } catch { /* launcher 可加载失败时继续按旧行为 */ }
+        if (isShuttingDown()) {
+            logger.warn('工作池', `[${this.name}] 服务正在关闭，跳过浏览器重建`);
+            return;
+        }
 
         this.initialized = false;
+        const oldBrowser = this.browser;
+        const oldPage = this.page;
         this.browser = null;
         this.page = null;
+
+        // 释放旧 page/context，避免 reinit 泄漏 live context 与 proxy relay
+        await this._releaseBrowserResources(oldBrowser, oldPage);
 
         // 使用保存的参数重新初始化
         await this._initNewBrowser(this._targetUrl || 'about:blank', this._navigationHandler || null);
         this.initialized = true;
         logger.info('工作池', `[${this.name}] 浏览器已成功重新初始化`);
+    }
+
+    /**
+     * 关闭旧 page/context（失败记录但不阻塞）
+     * @private
+     */
+    async _releaseBrowserResources(oldBrowser, oldPage) {
+        try {
+            if (oldPage && typeof oldPage.close === 'function' && !oldPage.isClosed?.()) {
+                await oldPage.close();
+            }
+        } catch (e) {
+            logger.warn('工作池', `[${this.name}] 关闭旧 page 失败: ${e.message}`);
+        }
+        try {
+            // persistent context / browser 均提供 close
+            if (oldBrowser && typeof oldBrowser.close === 'function' && !oldBrowser.isClosed?.()) {
+                await oldBrowser.close();
+            }
+        } catch (e) {
+            logger.warn('工作池', `[${this.name}] 关闭旧 context 失败: ${e.message}`);
+        }
     }
 
     /**

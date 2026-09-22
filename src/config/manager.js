@@ -8,6 +8,7 @@ import path from 'path';
 import yaml from 'yaml';
 import { logger } from '../utils/logger.js';
 import { getConfigPath } from './index.js';
+import { sanitizeClearcoteArgs } from '../backend/engine/engineContract.js';
 
 /**
  * 读取原始配置（不带缓存，直接从磁盘读取）
@@ -161,7 +162,13 @@ export function saveBrowserConfig(data) {
         if (cc.webrtcIp !== undefined) config.browser.clearcote.webrtcIp = cc.webrtcIp;
         if (cc.sandbox !== undefined) config.browser.clearcote.sandbox = cc.sandbox !== false;
         if (cc.allowDetectedLicense !== undefined) config.browser.clearcote.allowDetectedLicense = cc.allowDetectedLicense === true;
-        if (cc.args !== undefined) config.browser.clearcote.args = Array.isArray(cc.args) ? cc.args : [];
+        if (cc.args !== undefined) {
+            try {
+                config.browser.clearcote.args = sanitizeClearcoteArgs(Array.isArray(cc.args) ? cc.args : []);
+            } catch (e) {
+                throw e;
+            }
+        }
     }
     if (data.camoufox) {
         if (!config.browser.camoufox) config.browser.camoufox = {};

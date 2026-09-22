@@ -266,7 +266,7 @@ const handleSave = async () => {
 
         <a-card title="Clearcote（Chromium 基座）" :bordered="false" class="sec">
             <a-alert type="info" show-icon style="margin-bottom:12px"
-                description="Clearcote 官方支持 Windows x64 / Linux x64；macOS 仍在 roadmap。profile 使用 data/clearcoteUserData*，与 Camoufox 目录隔离。切换 engine 需重启服务。免费 GitHub 构建默认同时仅 1 个 Clearcote 浏览器。容器内如需 --no-sandbox，请在 args 中显式填写。" />
+                description="Clearcote 官方支持 Windows x64 / Linux x64；macOS 仍在 roadmap。profile 使用 data/clearcoteUserData*，与 Camoufox 目录隔离。切换 engine 需重启服务。免费 GitHub 构建默认同时仅 1 个 Clearcote 浏览器。容器内如需 --no-sandbox，请使用 sandbox 开关（args 禁止手写 --no-sandbox）。" />
             <a-form layout="vertical">
                 <a-row :gutter="16">
                     <a-col :span="8">

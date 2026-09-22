@@ -273,27 +273,24 @@ assertOk('releaseInfo is browser not sdk', () => {
 async function asyncTests() {
     console.log('== T4 shutdown / reinit lifecycle ==');
     try {
-        const launcher = await import('../src/backend/engine/launcher.js');
-        assert.strictEqual(launcher.isShuttingDown(), true, 'previous smoke left shuttingDown; reset not exposed');
-    } catch (e) {
-        // isShuttingDown may already be true if cleanup ran in same process — tolerate
-        passed++;
-        console.log('  ok  launcher isShuttingDown exported');
-    }
-
-    try {
         const { Worker } = await import('../src/backend/pool/Worker.js');
-        assert.strictEqual(typeof Worker, 'function');
-        // single-flight: two concurrent _reinit on a bare object should share one promise
         const fake = Object.create(Worker.prototype);
         fake.name = 'fake';
         fake.initialized = true;
-        fake.browser = {};
-        fake.page = {};
+        fake.browser = {
+            closed: false,
+            isClosed() { return this.closed; },
+            async close() { this.closed = true; }
+        };
+        fake.page = {
+            closed: false,
+            isClosed() { return this.closed; },
+            async close() { this.closed = true; }
+        };
         let calls = 0;
         fake._initNewBrowser = async () => {
             calls++;
-            await new Promise((r) => setTimeout(r, 30));
+            await new Promise((r) => setTimeout(r, 20));
         };
         const p1 = fake._reinit();
         const p2 = fake._reinit();
@@ -305,6 +302,70 @@ async function asyncTests() {
     } catch (e) {
         failed++;
         console.error('  FAIL _reinit single-flight: ' + e.message);
+    }
+
+    try {
+        const { Worker } = await import('../src/backend/pool/Worker.js');
+        const fake = Object.create(Worker.prototype);
+        fake.name = 'fake-release';
+        let pageClosed = 0;
+        let ctxClosed = 0;
+        const oldPage = { isClosed: () => false, close: async () => { pageClosed++; } };
+        const oldBrowser = { isClosed: () => false, close: async () => { ctxClosed++; } };
+        await fake._releaseBrowserResources(oldBrowser, oldPage);
+        assert.strictEqual(pageClosed, 1);
+        assert.strictEqual(ctxClosed, 1);
+        await fake._releaseBrowserResources(
+            { isClosed: () => false, close: async () => { throw new Error('x'); } },
+            { isClosed: () => false, close: async () => { throw new Error('y'); } }
+        );
+        passed++;
+        console.log('  ok  reinit releases old page/context');
+    } catch (e) {
+        failed++;
+        console.error('  FAIL reinit release: ' + e.message);
+    }
+
+    try {
+        const launcher = await import('../src/backend/engine/launcher.js');
+        await launcher.cleanup();
+        assert.strictEqual(launcher.isShuttingDown(), true);
+        passed++;
+        console.log('  ok  cleanup sets isShuttingDown');
+
+        const { Worker } = await import('../src/backend/pool/Worker.js');
+        const fake = Object.create(Worker.prototype);
+        fake.name = 'fake-shutdown';
+        fake.initialized = false;
+        fake.browser = null;
+        fake.page = null;
+        let launched = 0;
+        fake._initNewBrowser = async () => { launched++; };
+        await fake._reinit();
+        assert.strictEqual(launched, 0, 'must not launch while shutting down');
+        passed++;
+        console.log('  ok  no reinit/launch during shutdown');
+    } catch (e) {
+        failed++;
+        console.error('  FAIL shutdown no-reinit: ' + e.message);
+    }
+
+    console.log('== T7 concurrent seed create ==');
+    try {
+        const dir = path.join(tmpdir(), 'profile-conc');
+        // 进程内并发：ensureClearcoteSeed 为同步，用两线程语义模拟同 tick 双调用
+        const s1 = ensureClearcoteSeed(dir);
+        const s2 = ensureClearcoteSeed(dir);
+        assert.strictEqual(s1, s2);
+        // 模拟锁被占用超时：预置锁目录且无 seed
+        const dir2 = path.join(tmpdir(), 'profile-locked');
+        fs.mkdirSync(path.join(dir2, '.webai2api-clearcote.lock'), { recursive: true });
+        assert.throws(() => ensureClearcoteSeed(dir2), /锁超时|无锁|并发/);
+        passed++;
+        console.log('  ok  seed lock timeout refuses unlocked write');
+    } catch (e) {
+        failed++;
+        console.error('  FAIL seed concurrency: ' + e.message);
     }
 
     console.log('== T5 SOCKS5 credential pair and handle ==');
@@ -347,6 +408,68 @@ async function asyncTests() {
     } catch (e) {
         failed++;
         console.error('  FAIL SOCKS5 no-auth: ' + e.message);
+    }
+
+    try {
+        // 本地 SOCKS5 认证 fixture：成功/失败
+        const net = await import('net');
+        const { once } = await import('events');
+
+        function startSocks5(user, pass) {
+            return new Promise((resolve) => {
+                const server = net.createServer((sock) => {
+                    sock.once('data', (buf) => {
+                        // methods: prefer user/pass 0x02
+                        sock.write(Buffer.from([0x05, 0x02]));
+                        sock.once('data', (authBuf) => {
+                            const ulen = authBuf[1];
+                            const u = authBuf.slice(2, 2 + ulen).toString();
+                            const plen = authBuf[2 + ulen];
+                            const p = authBuf.slice(3 + ulen, 3 + ulen + plen).toString();
+                            if (u === user && p === pass) {
+                                sock.write(Buffer.from([0x01, 0x00]));
+                                // 极简：认证后立刻结束（relay 建立连接即可视为认证成功）
+                                sock.end();
+                            } else {
+                                sock.write(Buffer.from([0x01, 0x01]));
+                                sock.end();
+                            }
+                        });
+                    });
+                });
+                server.listen(0, '127.0.0.1', () => resolve(server));
+            });
+        }
+
+        const okSrv = await startSocks5('alice', 'secret');
+        const okPort = okSrv.address().port;
+        const handle = await acquireClearcoteProxy({
+            enable: true, type: 'socks5', host: '127.0.0.1', port: okPort,
+            user: 'alice', passwd: 'secret'
+        });
+        assert.ok(handle && handle.proxy && handle.proxy.server.startsWith('http://127.0.0.1:'));
+        assert.ok(handle.relayUrl, 'auth socks5 must use relay');
+        await releaseProxyHandle(handle);
+        okSrv.close();
+        passed++;
+        console.log('  ok  SOCKS5 auth relay created (success path)');
+
+        const badSrv = await startSocks5('alice', 'secret');
+        const badPort = badSrv.address().port;
+        // 错误凭据：relay 建立可能成功，但上游认证失败应可观测；至少不应静默变无认证
+        const handleBad = await acquireClearcoteProxy({
+            enable: true, type: 'socks5', host: '127.0.0.1', port: badPort,
+            user: 'alice', passwd: 'wrong'
+        });
+        assert.ok(handleBad.relayUrl, 'still creates relay for bad creds (fails at use time)');
+        // 释放后不再残留
+        await releaseProxyHandle(handleBad);
+        badSrv.close();
+        passed++;
+        console.log('  ok  SOCKS5 bad-creds still requires auth relay (not dropped)');
+    } catch (e) {
+        failed++;
+        console.error('  FAIL SOCKS5 auth fixture: ' + e.message);
     }
 
     console.log('== summary ==');

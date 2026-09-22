@@ -311,7 +311,7 @@ function ensureClearcoteSeedUnlocked(userDataDir) {
         );
     }
 
-    // 目录锁：首次并发创建串行化
+    // 目录锁：首次并发创建串行化；超时拒绝无锁写入，避免双身份
     const deadline = Date.now() + 5000;
     let locked = false;
     while (Date.now() < deadline) {
@@ -325,6 +325,15 @@ function ensureClearcoteSeedUnlocked(userDataDir) {
             const shared = new Int32Array(new SharedArrayBuffer(4));
             Atomics.wait(shared, 0, 0, 20);
         }
+    }
+
+    if (!locked) {
+        const found = readClearcoteSeedFile(userDataDir);
+        if (found.ok) return found.seed;
+        throw new Error(
+            'Clearcote seed 创建锁超时，拒绝在无锁状态下写入（避免并发双身份）。' +
+            `请清理 ${lockPath} 后重试。`
+        );
     }
 
     try {
@@ -347,9 +356,7 @@ function ensureClearcoteSeedUnlocked(userDataDir) {
         writeSeedFileAtomic(metaPath, meta);
         return seed;
     } finally {
-        if (locked) {
-            try { fs.rmdirSync(lockPath); } catch { /* ignore */ }
-        }
+        try { fs.rmdirSync(lockPath); } catch { /* ignore */ }
     }
 }
 
@@ -441,13 +448,13 @@ export function buildClearcoteLaunchOptions(params) {
  * @returns {string}
  */
 export function normalizeFingerprintProfile(value) {
-    if (value === undefined || value === null || value === '') {
+    if (value === undefined || value === null) {
         return '';
     }
     if (typeof value !== 'string') {
         throw new Error('browser.clearcote.fingerprintProfile 必须是字符串路径');
     }
-    return value;
+    return value.trim();
 }
 
 /** 启动参数中安全敏感、禁止用户覆盖的前缀/全名 */

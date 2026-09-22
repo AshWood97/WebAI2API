@@ -91,6 +91,7 @@ export async function getBrowserProxy(proxyConfig) {
         return null;
     }
 
+    assertProxyCredentialsPair(proxyConfig);
     const { type, host, port, user, passwd } = proxyConfig;
 
     // 构建代理 URL 字符串
