@@ -397,6 +397,9 @@ fn free_port() -> u16 {
 }
 
 /// flock 跨进程互斥：任一进程持锁时，另一进程启动必须被拒绝（互斥语义不能只靠 PID 存活检测）。
+///
+/// 探针子进程用 fork + execv 直接执行 cargo 注入的测试产物：无 shell 参与，
+/// 参数只有 `--lock-probe` 和本测试自建的临时目录（不来自任何外部输入）。
 #[test]
 fn lock_cross_process() {
     let dir = std::env::temp_dir().join(format!("webai2api-lockproc-{}", std::process::id()));
@@ -406,25 +409,43 @@ fn lock_cross_process() {
     // 测试进程自身持锁
     webai2api_rs::instance_lock::acquire_lock(&dir).expect("测试进程应能获取锁");
 
-    let binary = env!("CARGO_BIN_EXE_webai2api");
-    let out = std::process::Command::new(binary)
-        .arg("--lock-probe")
-        .arg(&dir)
-        .output()
-        .unwrap();
-    assert_eq!(
-        String::from_utf8_lossy(&out.stdout).trim(),
-        "LOCKED-ELSEWHERE"
-    );
-    assert_eq!(out.status.code(), Some(0));
+    // fork 子进程执行探针，父进程从管道读其 stdout
+    let probe = |dir: &std::path::Path| -> String {
+        use std::ffi::CString;
+        use std::io::Read;
+        use std::os::unix::io::FromRawFd;
+        let mut fds = [0i32; 2];
+        assert_eq!(unsafe { libc::pipe(fds.as_mut_ptr()) }, 0);
+        let pid = unsafe { libc::fork() };
+        assert!(pid >= 0, "fork 失败");
+        if pid == 0 {
+            unsafe {
+                libc::close(fds[0]);
+                libc::dup2(fds[1], 1);
+                libc::close(fds[1]);
+                let bin = CString::new(env!("CARGO_BIN_EXE_webai2api")).unwrap();
+                let a1 = CString::new("--lock-probe").unwrap();
+                let a2 = CString::new(dir.to_string_lossy().to_string()).unwrap();
+                let argv: Vec<*const libc::c_char> =
+                    vec![bin.as_ptr(), a1.as_ptr(), a2.as_ptr(), std::ptr::null()];
+                libc::execv(bin.as_ptr(), argv.as_ptr());
+                libc::_exit(127);
+            }
+        }
+        unsafe { libc::close(fds[1]) };
+        let mut file = unsafe { std::fs::File::from_raw_fd(fds[0]) };
+        let mut out = String::new();
+        let _ = file.read_to_string(&mut out);
+        std::mem::forget(file);
+        let mut status = 0i32;
+        unsafe { libc::waitpid(pid, &mut status, 0) };
+        assert!(libc::WIFEXITED(status), "探针进程异常终止");
+        out.trim().to_string()
+    };
+    assert_eq!(probe(&dir), "LOCKED-ELSEWHERE");
 
     webai2api_rs::instance_lock::release_lock(&dir);
-    let out = std::process::Command::new(binary)
-        .arg("--lock-probe")
-        .arg(&dir)
-        .output()
-        .unwrap();
-    assert_eq!(String::from_utf8_lossy(&out.stdout).trim(), "ACQUIRED");
+    assert_eq!(probe(&dir), "ACQUIRED");
 
     let _ = std::fs::remove_dir_all(&dir);
 }
