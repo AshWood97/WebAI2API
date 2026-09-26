@@ -1,0 +1,35 @@
+[package]
+name = "webai2api-rs"
+version = "3.10.0"
+edition = "2021"
+description = "WebAI2API 的 Rust 重写：HTTP/队列/配置/历史/进程管理，浏览器驱动层通过 Node 引擎桥调用"
+
+[dependencies]
+tokio = { version = "1", features = ["full"] }
+axum = { version = "0.8", features = ["ws"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "2"
+serde_yaml = "0.9"
+rusqlite = { version = "0.32", features = ["bundled"] }
+sha1 = "0.10"
+base64 = "0.22"
+image = { version = "0.25", default-features = false, features = ["jpeg", "png", "gif", "webp"] }
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json"] }
+chrono = "0.4"
+libc = "0.2"
+async-stream = "0.3"
+url = "2"
+
+[[bin]]
+name = "webai2api"
+path = "src/main.rs"
+
+[[bin]]
+name = "webai2api-genkey"
+path = "src/bin/genkey.rs"
+
+[profile.release]
+lto = true
+codegen-units = 1
+strip = true
