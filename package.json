@@ -13,7 +13,10 @@
 		"test:camoufox-upgrade": "node scripts/test-camoufox-upgrade.mjs",
 		"test:api-upgrade": "node scripts/test-upgrade.mjs",
 		"test:ops-docs": "node scripts/test-ops-docs.mjs",
-		"test:browser-engines": "node scripts/test-browser-engines.mjs"
+		"test:browser-engines": "node scripts/test-browser-engines.mjs",
+		"test:browser-close-semantics": "node scripts/test-browser-close-semantics.mjs",
+		"sync-rs-version": "node scripts/sync-rs-version.mjs",
+		"sync-rs-version:check": "node scripts/sync-rs-version.mjs --check"
 	},
 	"imports": {
 		"#config": "./src/config/index.js",

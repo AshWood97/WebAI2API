@@ -4,3 +4,17 @@ test/
 config.yaml
 camoufox/
 .worktrees/
+
+# Rust（WebAI2API-RS）
+target/
+WebAI2API-RS/data/
+WebAI2API-RS/node_modules/
+
+# 系统/编辑器
+.DS_Store
+
+# 本地工具状态
+.mimosa/
+.zcode/
+WebAI2API-RS/.mimosa/
+src/backend/adapter/.mimosa/

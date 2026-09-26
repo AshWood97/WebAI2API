@@ -1,0 +1,74 @@
+name: Rust CI
+
+# WebAI2API-RS 的持续集成：格式、Clippy、单元/集成测试、release 构建。
+on:
+  push:
+    paths:
+      - 'WebAI2API-RS/**'
+      - '.github/workflows/rust-ci.yml'
+      - 'src/**'
+      - 'bridge/**'
+  pull_request:
+    paths:
+      - 'WebAI2API-RS/**'
+      - '.github/workflows/rust-ci.yml'
+      - 'src/**'
+      - 'bridge/**'
+
+env:
+  CARGO_TERM_COLOR: always
+
+defaults:
+  run:
+    working-directory: WebAI2API-RS
+
+jobs:
+  check:
+    name: fmt / clippy / test / build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # 仓库根目录同时被 Node 版与 RS 桥引用（adapter 扫描、mock 桥需要 src-root）
+      - name: Verify src-root layout
+        run: test -d ../src/backend/adapter
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      # mock 引擎桥与集成测试需要 node；不安装浏览器内核
+      - name: Install Node dependencies
+        run: npm ci --ignore-scripts || npm install --ignore-scripts
+
+      - name: Set up Rust
+        uses: dtolnay/rust-action@stable
+
+      - name: Cache cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            WebAI2API-RS/target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('WebAI2API-RS/Cargo.lock') }}
+
+      - name: cargo fmt --check
+        run: cargo fmt --all --check
+
+      - name: cargo clippy --all-targets
+        run: cargo clippy --all-targets -- -D warnings
+
+      # adapter 扫描测试需要原仓库根（../src）
+      - name: cargo test
+        run: cargo test
+        env:
+          WEBAI2API_TEST_SRC_ROOT: ${{ github.workspace }}
+
+      - name: Version sync check
+        run: node ../scripts/sync-rs-version.mjs --check
+
+      - name: cargo build --release
+        run: cargo build --release

@@ -5,6 +5,29 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### ✨ Added — Rust 版（WebAI2API-RS）进入可交付状态
+
+- **定位**：HTTP 服务、队列、配置、历史、统计、日志、进程管理由单个 Rust 二进制承担；浏览器驱动层（camoufox / clearcote 及 19 个适配器）经 Node 引擎桥子进程复用原仓库代码，原仓库零改动
+- **停机正确性**：`/admin/stop`、IPC `STOP`、Ctrl-C、SIGTERM 收敛到同一条清理通道（桥 shutdown → 杀进程组 → 清锁）；桥 setsid 自成进程组，camoufox 孙进程不会成为孤儿
+- **预检**：启动时经桥执行原版 `runPreflight()`（依赖/内核/GeoIP），失败以退出码 78 明确退出
+- **单实例锁**：Unix 改用 flock 独占（进程死亡自动释放，消除 check-then-write 竞态）；双实例启动拒绝启动
+- **测试**：42 个 Rust 测试（单元 + mock 桥端到端集成：生成链路、安全模式 503、桥崩溃自愈、非流式 429、flock 跨进程互斥、优雅停机）；CI 跑 fmt / clippy(-D warnings) / test / release 构建
+- **效率**：SQLite、图片编解码、文件读取等阻塞调用移出 async 上下文（spawn_blocking）；模型表缓存 + 聚合 IPC（聊天请求从 3 次串行往返降为 1 次）；日志句柄常驻；uname/sysctl 缓存
+- **质量**：thiserror 错误类型替换字符串错误链；server.rs 拆分（metrics / webui / config_patch 模块）；配置类型化视图（serde 结构体，未知字段保序）；API token 常量时间比较
+- **修复**：历史记录 id 改为随机 hex（原纳秒时间戳低 32 位会回绕碰撞致记录静默丢失）；`/v1/models` 与 `/v1/stateless/models` 精确匹配；配置写回原子化（temp+rename+回滚+互斥）；`/v1/cookies` 与 history 行字段对齐 Node 响应形状；retry-media 补裸 HTTP 兜底与记录更新；Xvfb/VNC 子进程退出监控
+- **运维**：`scripts/sync-rs-version.mjs` 对齐 package.json 与 Cargo.toml 版本；Dockerfile 两阶段构建已就绪
+
+### 🐛 Fixed — 有头模式下关闭 Camoufox 窗口后自动重启
+
+- **根因**：`Worker` 的 context close 处理器把任何关闭都判定为"崩溃"并重建浏览器，而唯一的守卫 `isShuttingDown()` 只在 SIGINT/SIGTERM 走 `cleanup()` 时才置位，用户手动关窗永远不会经过该路径（旧行为见 3.4.7「崩溃重启：浏览器崩溃或者被关闭时不导致项目退出而是重启」）
+- **修复**：启动时在 context 上记录是否无头启动；有头 context 关闭视为用户意图，调用 `markBrowserUserStopped()` 后不再自动重建，并同步释放共享 Worker 的引用。无头（Docker）context 关闭仍按崩溃自愈，不回归部署可用性
+- **恢复入口**：`POST /admin/browser/restart` 与 WebUI「恢复浏览器」按钮（仅在浏览器被手动关闭时出现）；`/v1/runtime/status` 的 `browser.userStopped` 与 worker 级 `stopped` 可观测状态
+- **请求语义**：浏览器被手动关闭后，新请求返回明确错误（不再静默拉起浏览器），提示通过恢复端点或重启服务处理
+- **附带修复**：`POST /admin/stop` 现在先 `cleanup()` 再退出（此前直接 `process.exit(0)` 且 `globalBrowserProcess` 恒为 null，会留下孤儿 Firefox 进程）；`doCleanup` 的 SIGTERM/SIGKILL 兜底现在能拿到真实进程句柄
+- **测试**：`pnpm test:browser-close-semantics`（`scripts/test-browser-close-semantics.mjs`，45 项断言覆盖有头/无头/shutdown/共享浏览器/恢复守卫）
+
 ## [3.10.0] - 2026-09-21
 
 ### ✨ Added — 双浏览器基座：Camoufox + Clearcote
