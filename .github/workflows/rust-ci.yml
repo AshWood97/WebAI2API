@@ -42,7 +42,7 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      # 仓库根目录同时被 Node 版与 RS 桥引用（adapter 扫描、mock 桥需要 src-root）
+      # 离线兼容性测试需要原 Node 适配器作为行为基线
       - name: Verify src-root layout
         run: test -d ../src/backend/adapter
 
@@ -75,7 +75,7 @@ jobs:
       - name: cargo clippy --all-targets
         run: cargo clippy --all-targets -- -D warnings
 
-      # adapter 扫描测试需要原仓库根（../src）
+      # 适配器元数据回归需读取原仓库根（../src）
       - name: cargo test
         run: cargo test
         env:

@@ -302,29 +302,58 @@ async fn finish_ok(task: &mut Task, gen: GenerateResult, image_markdown: bool, d
         .await;
         return;
     }
-    stats::increment_success().await;
-
-    let content = if let Some(path) = &gen.image_path {
-        let url = data_uri_of(path, gen.image_mime.as_deref().unwrap_or("image/png"));
-        let _ = history::save_data_uri(&url, &task.id).await;
-        if image_markdown {
-            format!("![generated]({url})")
-        } else {
-            url
+    let image = if let Some(path) = &gen.image_path {
+        match data_uri_of(path, gen.image_mime.as_deref().unwrap_or("image/png")).await {
+            Ok(uri) => Some(uri),
+            Err(error) => {
+                finish_err(
+                    task,
+                    &format!("读取生成媒体失败: {error}"),
+                    "GENERATION_FAILED",
+                    false,
+                    502,
+                    duration,
+                )
+                .await;
+                return;
+            }
         }
-    } else if let Some(url) = &gen.image_url {
-        url.clone()
     } else {
-        gen.text.clone().unwrap_or_else(|| "生成失败".to_string())
+        gen.image_url.clone()
     };
+    let (content, history_text, response_media) = if let Some(image) = image {
+        let media = if image.starts_with("data:") {
+            match history::save_data_uri(&image, &task.id).await {
+                Ok(saved) => json!({
+                    "type": saved["type"],
+                    "originalUrl": gen.image_url.as_ref().filter(|url| !url.starts_with("data:")),
+                    "localPath": saved["localPath"],
+                    "status": "downloaded"
+                }),
+                Err(_) => {
+                    json!({"type":"unknown","originalUrl":null,"localPath":null,"status":"failed"})
+                }
+            }
+        } else {
+            json!({"type":"unknown","originalUrl":image,"localPath":null,"status":"external"})
+        };
+        let history_text = image_history_text(gen.image_url.as_deref());
+        let content = image_content(image, image_markdown);
+        (content, history_text, json!([media]))
+    } else {
+        let text = gen.text.clone().unwrap_or_else(|| "生成失败".to_string());
+        (text.clone(), text, json!([]))
+    };
+    let response_media_json = response_media.to_string();
+    stats::increment_success().await;
 
     let _ = history::update_record(
         &task.id,
         &RecordUpdate {
             status: Some("success"),
-            response_text: Some(&content),
+            response_text: Some(&history_text),
             reasoning_content: gen.reasoning.as_deref(),
-            response_media: None,
+            response_media: Some(&response_media_json),
             error_message: None,
             duration_ms: Some(duration),
         },
@@ -376,19 +405,64 @@ async fn finish_err(
         let _ = reply.send((status, body));
     }
 }
-fn data_uri_of(path: &str, mime: &str) -> String {
-    match std::fs::read(path) {
-        Ok(bytes) => {
-            let b64 = base64::Engine::encode(&base64::engine::general_purpose::STANDARD, bytes);
-            format!("data:{mime};base64,{b64}")
-        }
-        Err(_) => String::new(),
+async fn data_uri_of(path: &str, mime: &str) -> std::io::Result<String> {
+    let path = path.to_owned();
+    let mime = mime.to_owned();
+    tokio::task::spawn_blocking(move || {
+        let bytes = std::fs::read(path)?;
+        let b64 = base64::Engine::encode(&base64::engine::general_purpose::STANDARD, bytes);
+        Ok(format!("data:{mime};base64,{b64}"))
+    })
+    .await
+    .map_err(std::io::Error::other)?
+}
+
+fn image_history_text(original_url: Option<&str>) -> String {
+    original_url
+        .filter(|url| !url.starts_with("data:"))
+        .unwrap_or_default()
+        .to_owned()
+}
+
+fn image_content(image: String, markdown: bool) -> String {
+    if markdown {
+        format!("![generated]({image})")
+    } else {
+        image
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn image_output_does_not_store_base64_as_history_text() {
+        let path = std::env::temp_dir().join(format!(
+            "webai2api-image-output-{}-{}.png",
+            std::process::id(),
+            chrono::Utc::now().timestamp_nanos_opt().unwrap_or_default()
+        ));
+        std::fs::write(&path, b"png bytes").unwrap();
+        let data = data_uri_of(path.to_str().unwrap(), "image/png")
+            .await
+            .unwrap();
+        std::fs::remove_file(path).unwrap();
+        assert!(data.starts_with("data:image/png;base64,"));
+        assert_eq!(image_history_text(Some(&data)), "");
+        assert_eq!(
+            image_content(data.clone(), true),
+            format!("![generated]({data})")
+        );
+        assert_eq!(
+            image_content(data, false),
+            "data:image/png;base64,cG5nIGJ5dGVz"
+        );
+        assert_eq!(
+            image_history_text(Some("https://example.test/a.png")),
+            "https://example.test/a.png"
+        );
+    }
 
     /// 连接一个"只接受连接、不回应"的本地 socket，供 Queue 构造 Bridge。
     async fn dummy_bridge(tag: &str) -> Bridge {

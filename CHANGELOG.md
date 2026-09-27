@@ -7,17 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### ✨ Added — Rust 版（WebAI2API-RS）进入可交付状态
+### ✨ Added — WebAI2API-RS 深度 Rust 化
 
-- **定位**：HTTP 服务、队列、配置、历史、统计、日志、进程管理由单个 Rust 二进制承担；浏览器驱动层（camoufox / clearcote 及 19 个适配器）经 Node 引擎桥子进程复用原仓库代码，原仓库零改动
+- **业务边界**：HTTP、队列、配置、历史、统计、日志、进程管理、Worker 选择、模型目录、merge、故障转移和 19 个站点的页面流程均在 Rust。Node 子进程只管理 Camoufox/Clearcote 浏览器 SDK，并提供通用页面、事件、路由和下载 RPC；生产入口不再导入原 Node 后端或站点适配器
+- **站点契约**：19 个适配器的模型元数据、导航、上传、响应解析与错误判断已迁移；模型目录保持 318 项原始记录，配置文件、模型 ID 和历史库兼容
+- **测试**：Rust 单测、HTTP/进程集成测试和通用桥协议测试；包含 Rust 适配器的 mock 浏览器端到端生成、启动期间 SIGTERM、桥崩溃孙进程、并发配置提交和历史媒体删除
+- **部署**：Docker 构建编译 WebUI；Linux CI 配置为构建并启动 RS 镜像，检查真实 Camoufox 启停与 HTTP/WebUI；macOS 本机真实浏览器启停已验证
 - **停机正确性**：`/admin/stop`、IPC `STOP`、Ctrl-C、SIGTERM 收敛到同一条清理通道（桥 shutdown → 杀进程组 → 清锁）；桥 setsid 自成进程组，camoufox 孙进程不会成为孤儿
-- **预检**：启动时经桥执行原版 `runPreflight()`（依赖/内核/GeoIP），失败以退出码 78 明确退出
+- **预检**：启动时经通用桥检查所选浏览器引擎的依赖、内核、补丁和 GeoIP，失败以退出码 78 明确退出
 - **单实例锁**：Unix 改用 flock 独占（进程死亡自动释放，消除 check-then-write 竞态）；双实例启动拒绝启动
-- **测试**：42 个 Rust 测试（单元 + mock 桥端到端集成：生成链路、安全模式 503、桥崩溃自愈、非流式 429、flock 跨进程互斥、优雅停机）；CI 跑 fmt / clippy(-D warnings) / test / release 构建
 - **效率**：SQLite、图片编解码、文件读取等阻塞调用移出 async 上下文（spawn_blocking）；模型表缓存 + 聚合 IPC（聊天请求从 3 次串行往返降为 1 次）；日志句柄常驻；uname/sysctl 缓存
 - **质量**：thiserror 错误类型替换字符串错误链；server.rs 拆分（metrics / webui / config_patch 模块）；配置类型化视图（serde 结构体，未知字段保序）；API token 常量时间比较
 - **修复**：历史记录 id 改为随机 hex（原纳秒时间戳低 32 位会回绕碰撞致记录静默丢失）；`/v1/models` 与 `/v1/stateless/models` 精确匹配；配置写回原子化（temp+rename+回滚+互斥）；`/v1/cookies` 与 history 行字段对齐 Node 响应形状；retry-media 补裸 HTTP 兜底与记录更新；Xvfb/VNC 子进程退出监控
-- **运维**：`scripts/sync-rs-version.mjs` 对齐 package.json 与 Cargo.toml 版本；Dockerfile 两阶段构建已就绪
+- **运维**：`scripts/sync-rs-version.mjs` 对齐 package.json 与 Cargo.toml 版本；Dockerfile 多阶段构建 Rust、WebUI 和浏览器运行时
 
 ### 🐛 Fixed — 有头模式下关闭 Camoufox 窗口后自动重启
 
