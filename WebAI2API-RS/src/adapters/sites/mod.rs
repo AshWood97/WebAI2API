@@ -11,6 +11,8 @@ mod google_flow;
 mod lmarena;
 mod lmarena_text;
 mod nanobananafree_ai;
+mod sora;
+mod zai_is;
 mod zai_is_text;
 mod zenmux_ai_text;
 
@@ -27,5 +29,7 @@ pub use google_flow::GoogleFlowAdapter;
 pub use lmarena::LmArena;
 pub use lmarena_text::LmArenaText;
 pub use nanobananafree_ai::NanoBananaFreeAdapter;
+pub use sora::SoraAdapter;
+pub use zai_is::ZaiIsAdapter;
 pub use zai_is_text::ZaiIsTextAdapter;
 pub use zenmux_ai_text::ZenmuxAiTextAdapter;

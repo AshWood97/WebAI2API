@@ -129,6 +129,14 @@ impl BrowserRpc {
         self.call_default("preflight", json!({})).await
     }
 
+    pub async fn preflight_with_config(
+        &self,
+        config: &Value,
+    ) -> Result<PreflightResult, BridgeError> {
+        self.call_default("preflight", json!({"config": config}))
+            .await
+    }
+
     pub async fn browser_start(
         &self,
         config: Value,

@@ -11,6 +11,11 @@ import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { randomUUID } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
+import os from 'node:os';
+import crypto from 'node:crypto';
+import { collectReferencedEngines } from './engine/engineContract.js';
+import { preflightClearcote } from './engine/clearcoteMeta.js';
+import { readCamoufoxVersion } from './engine/camoufoxMeta.js';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const MAX_LINE_BYTES = 8 * 1024 * 1024;
@@ -72,17 +77,36 @@ export class BrowserRuntime {
         const root = process.env.WEBAI2API_SRC_ROOT;
         if (!root) throw new Error('WEBAI2API_SRC_ROOT is required to start a browser');
         process.env.CAMOUFOX_INSTALL_DIR ||= path.join(root, 'camoufox');
-        const launcherUrl = pathToFileURL(path.join(root, 'src/backend/engine/launcher.js')).href;
+        const launcherUrl = pathToFileURL(path.join(HERE, 'engine/launcher.js')).href;
         this.launcher = await import(launcherUrl);
         return this.launcher;
     }
 
-    async preflight() {
+    async preflight({ config } = {}) {
         if (this.preflightFn) return await this.preflightFn();
         const root = process.env.WEBAI2API_SRC_ROOT;
         if (!root) return { ok: true, skipped: true };
-        const mod = await import(pathToFileURL(path.join(root, 'src/server/preflight.js')).href);
-        await mod.runPreflight();
+        const engines = collectReferencedEngines(config || { browser: { engine: 'camoufox' } });
+        const errors = [];
+        if (engines.has('camoufox')) {
+            const browserDir = path.join(root, 'camoufox');
+            const executable = process.platform === 'darwin'
+                ? path.join(browserDir, 'Camoufox.app', 'Contents', 'MacOS', 'camoufox')
+                : path.join(browserDir, process.platform === 'win32' ? 'camoufox.exe' : 'camoufox');
+            if (!fs.existsSync(executable)) errors.push('Camoufox 可执行文件缺失，请运行: npm run init');
+            const version = readCamoufoxVersion(browserDir);
+            if (!version) errors.push('camoufox/version.json 缺失或无法解析，请运行: npm run init');
+            else if (version.major < 146) errors.push(`Camoufox 内核过旧 (Firefox ${version.major})`);
+            if (!fs.existsSync(path.join(browserDir, 'GeoLite2-City.mmdb'))) errors.push('camoufox/GeoLite2-City.mmdb 缺失，请运行: npm run init');
+            const patch = path.join(root, 'patches', 'camoufox-js@0.12.0.utils.patched.js');
+            const installed = path.join(root, 'node_modules', 'camoufox-js', 'dist', 'utils.js');
+            if (fs.existsSync(patch)) {
+                const digest = file => fs.existsSync(file) ? crypto.createHash('md5').update(fs.readFileSync(file)).digest('hex') : null;
+                if (digest(patch) !== digest(installed)) errors.push('camoufox-js 补丁未应用，请运行: pnpm install');
+            }
+        }
+        if (engines.has('clearcote')) errors.push(...preflightClearcote(config?.browser?.clearcote || {}, os.platform()));
+        if (errors.length) throw new Error(`启动预检失败: ${errors.join('; ')}`);
         return { ok: true };
     }
 

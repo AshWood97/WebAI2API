@@ -3,7 +3,6 @@
 //! WebUI 用 authToken / keepaliveMode / logLevel；YAML 用 server.auth / keepalive.mode / 根 logLevel。
 
 use serde_json::Value;
-use std::path::Path;
 
 fn yaml_set(target: &mut serde_yaml::Value, key: &str, value: serde_yaml::Value) {
     if !target.is_mapping() {
@@ -19,19 +18,11 @@ fn to_yaml(v: &Value) -> serde_yaml::Value {
     serde_json::from_value(v.clone()).unwrap_or(serde_yaml::Value::Null)
 }
 
-/// 扫描 `src-root/src/backend/adapter/*.js` 得到适配器 ID（Node registry 的键即 manifest.id，
-/// 实测与文件名一致）。目录缺失时返回空表，让校验按"未知类型"拒绝而非 panic。
-pub fn adapter_ids_from_src(src_root: &Path) -> Vec<String> {
-    let dir = src_root.join("src/backend/adapter");
-    let Ok(entries) = std::fs::read_dir(&dir) else {
-        return Vec::new();
-    };
-    let mut ids: Vec<String> = entries
-        .flatten()
-        .filter_map(|e| {
-            let name = e.file_name().to_string_lossy().to_string();
-            name.strip_suffix(".js").map(str::to_string)
-        })
+/// Rust 内嵌适配器目录是唯一校验来源；全新部署无需原 Node 适配器源码。
+pub fn adapter_ids() -> Vec<String> {
+    let mut ids: Vec<String> = crate::catalog::adapters()
+        .iter()
+        .filter_map(|entry| entry.get("id").and_then(Value::as_str).map(str::to_owned))
         .collect();
     ids.sort();
     ids
@@ -578,7 +569,6 @@ pub fn apply_pool_patch(yaml: &mut serde_yaml::Value, patch: &Value) {
 mod tests {
     use super::*;
     use serde_json::json;
-    use std::path::PathBuf;
 
     #[test]
     fn config_patches_use_yaml_field_names() {
@@ -754,34 +744,11 @@ mod tests {
         assert!(ok.is_empty(), "{ok:?}");
     }
 
-    /// 适配器 ID 必须能从 src-root 真实扫到，否则配置校验会把合法 type 全部误判。
-    /// 用真实原仓库路径验证（运行时的 src_root 由 --src-root / WEBAI2API_SRC_ROOT 提供）。
+    /// 配置校验直接使用内嵌目录，与原 Node 适配器源目录解耦。
     #[test]
-    fn adapter_ids_come_from_src_root() {
-        // 运行时的 src_root 由 --src-root / WEBAI2API_SRC_ROOT 提供；测试允许显式指定，
-        // 否则用相对 RS 项目目录的常见开发布局（../src/backend/adapter）。
-        let candidates = [
-            std::env::var("WEBAI2API_TEST_SRC_ROOT")
-                .ok()
-                .map(PathBuf::from),
-            std::env::current_dir()
-                .ok()
-                .and_then(|d| d.parent().map(|p| p.to_path_buf())),
-        ];
-        let Some(root) = candidates
-            .into_iter()
-            .flatten()
-            .find(|p| p.join("src/backend/adapter").is_dir())
-        else {
-            return; // 无原仓库可扫时跳过
-        };
-        let ids = adapter_ids_from_src(&root);
-        assert!(
-            ids.contains(&"lmarena".to_string()),
-            "src-root={} ids={:?}",
-            root.display(),
-            ids
-        );
+    fn adapter_ids_come_from_embedded_catalog() {
+        let ids = adapter_ids();
+        assert!(ids.contains(&"lmarena".to_string()), "ids={:?}", ids);
         assert!(ids.contains(&"gemini".to_string()));
         assert!(!ids.iter().any(|i| i.contains('.')), "应已剥离 .js 后缀");
         // merge 是保留类型，不走适配器表

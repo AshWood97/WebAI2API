@@ -23,8 +23,8 @@ WORKDIR /app
 ENV DEBIAN_FRONTEND=noninteractive
 ENV PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=true
 ENV CAMOUFOX_INSTALL_DIR=/app/camoufox
-# 二进制装在 /usr/local/bin，桥、脚本与 WebUI 在 /opt/webai2api 下
-ENV WEBAI2API_HOME=/opt/webai2api
+# 二进制装在 /usr/local/bin；桥位于 /app 下，以便 ESM 解析 /app/node_modules。
+ENV WEBAI2API_HOME=/app/rs
 
 # 浏览器运行库与虚拟显示，同原仓库 Dockerfile
 RUN apt-get update && apt-get install -y \
@@ -42,14 +42,16 @@ COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
 COPY src ./src
 COPY scripts ./scripts
 COPY patches ./patches
-RUN npm install -g pnpm && pnpm install --frozen-lockfile && npm run init
+RUN npm install -g pnpm && pnpm install --frozen-lockfile && npm run init \
+    && rm -rf /app/src
 
 COPY --from=rust-build /src/target/release/webai2api /usr/local/bin/webai2api
 COPY --from=rust-build /src/target/release/webai2api-genkey /usr/local/bin/webai2api-genkey
-# 桥、辅助脚本与 WebUI 放在独立目录，避免覆盖原仓库的 scripts/
-COPY WebAI2API-RS/bridge /opt/webai2api/bridge
-COPY WebAI2API-RS/scripts /opt/webai2api/scripts
-COPY --from=webui-build /webui/dist /opt/webai2api/webui-dist
+# 桥、浏览器 SDK 辅助模块、脚本与 WebUI 放在独立目录。
+COPY WebAI2API-RS/bridge /app/rs/bridge
+COPY WebAI2API-RS/utils /app/rs/utils
+COPY WebAI2API-RS/scripts /app/rs/scripts
+COPY --from=webui-build /webui/dist /app/rs/webui-dist
 
 EXPOSE 3000 5900
 

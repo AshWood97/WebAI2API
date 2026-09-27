@@ -1472,7 +1472,6 @@ async fn save_config(state: &AppState, path: &str, body: &[u8]) -> Response {
         Serialized(String),
     }
     let cfg_path = state.config_path.clone();
-    let src_root = state.src_root.clone();
     let section = section.to_string();
     let prepared = match tokio::task::spawn_blocking(move || {
         let text = std::fs::read_to_string(&cfg_path).unwrap_or_default();
@@ -1485,8 +1484,7 @@ async fn save_config(state: &AppState, path: &str, body: &[u8]) -> Response {
             return Prepared::NotMapping;
         }
         // 先按原版 validator.js 逐条校验，通过后才允许写盘。
-        // 适配器 ID 与 Node registry 一致来自 src/backend/adapter/*.js（文件名即 manifest.id），本地扫描即可。
-        let adapter_ids = crate::config_patch::adapter_ids_from_src(&src_root);
+        let adapter_ids = crate::config_patch::adapter_ids();
         let errors = match section.as_str() {
             "server" => crate::config_patch::validate_server_patch(&patch),
             "browser" => crate::config_patch::validate_browser_patch(&patch),

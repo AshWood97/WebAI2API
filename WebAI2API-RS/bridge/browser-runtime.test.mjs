@@ -196,6 +196,7 @@ test('evaluate accepts fixed expression names only and runtime imports no legacy
     const denied = await runtime.pageCall({ pageId, operations: [{ op: 'evaluate', expression: 'return userText', args: { userText: 'unsafe' } }] });
     assert.equal(denied.failedIndex, 0);
     const source = await fs.promises.readFile(new URL('./browser-runtime.mjs', import.meta.url), 'utf8');
-    assert.doesNotMatch(source, /backend\/index\.js|PoolManager|registry\.js|adapters\//);
+    assert.match(source, /engine\/launcher\.js/);
+    assert.doesNotMatch(source, /src\/backend|src\/server|PoolManager|registry\.js|adapters\//);
     await runtime.shutdown();
 });
