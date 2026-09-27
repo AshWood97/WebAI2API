@@ -7,17 +7,22 @@ import { BrowserRuntime } from './browser-runtime.mjs';
 process.env.WEBAI2API_SRC_ROOT ||= process.cwd();
 const profile = await fs.mkdtemp(path.join(os.tmpdir(), 'webai2api-rs-browser-'));
 const runtime = new BrowserRuntime();
+const engine = process.env.WEBAI2API_SMOKE_ENGINE || 'camoufox';
 const watchdog = setTimeout(() => {
     console.error('browser smoke timed out');
     process.exit(124);
 }, 90000);
 
 try {
-    const config = { browser: { engine: 'camoufox', headless: true } };
+    const config = { browser: {
+        engine,
+        headless: true,
+        ...(engine === 'clearcote' ? { clearcote: { sandbox: false } } : {})
+    } };
     await runtime.preflight({ config });
     const started = await runtime.browserStart({
         config,
-        options: { engine: 'camoufox', userDataDir: profile, instanceName: 'rs-smoke' }
+        options: { engine, userDataDir: profile, instanceName: 'rs-smoke' }
     });
     const pageId = started.pageIds[0];
     if (!pageId) throw new Error('browser.start returned no page');

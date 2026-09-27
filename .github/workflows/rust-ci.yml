@@ -101,6 +101,9 @@ jobs:
       - name: Launch and close Camoufox in Linux image
         run: docker run --rm --shm-size=2g --entrypoint node webai2api-rs:ci /app/rs/bridge/browser-smoke.mjs
 
+      - name: Launch and close Clearcote in Linux image
+        run: docker run --rm --shm-size=2g -e WEBAI2API_SMOKE_ENGINE=clearcote --entrypoint node webai2api-rs:ci /app/rs/bridge/browser-smoke.mjs
+
       - name: Start isolated RS container and smoke test
         shell: bash
         run: |
