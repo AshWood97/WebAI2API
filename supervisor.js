@@ -183,9 +183,13 @@ function startIpcServer() {
 // ==================== 子进程管理 ====================
 
 // 不可恢复的退出码（不应自动重启）
+// 78: 配置/环境致命错误（含端口占用 EADDRINUSE 预检）
 const FATAL_EXIT_CODES = [
-    78,  // 配置/依赖错误
+    78,  // 配置/依赖/环境错误（含端口被占用）
 ];
+// 自动重启上限，防止“端口被占用”等场景无限拉起浏览器
+const MAX_AUTO_RESTARTS = 3;
+let autoRestartCount = 0;
 
 /**
  * 启动 server.js 子进程
@@ -225,10 +229,15 @@ function startServer(extraArgs = []) {
         } else if (code !== 0 && code !== null) {
             // 检查是否为不可恢复的错误
             if (FATAL_EXIT_CODES.includes(code)) {
-                log('ERROR', `子服务因配置/依赖错误退出 (code: ${code})，不会自动重启`);
+                log('ERROR', `子服务因配置/依赖/环境错误退出 (code: ${code})，不会自动重启`);
                 process.exit(code);
             }
-            log('WARN', `子服务异常退出 (code: ${code})，将自动重启...`);
+            autoRestartCount += 1;
+            if (autoRestartCount > MAX_AUTO_RESTARTS) {
+                log('ERROR', `子服务连续异常退出 ${autoRestartCount} 次，停止自动重启（防止无限拉起浏览器）。请检查端口占用、配置和依赖后手动启动。`);
+                process.exit(code);
+            }
+            log('WARN', `子服务异常退出 (code: ${code})，将自动重启 (${autoRestartCount}/${MAX_AUTO_RESTARTS})...`);
             setTimeout(() => startServer(extraArgs), RESTART_DELAY);
         } else {
             log('INFO', '子服务已正常退出');
@@ -392,6 +401,32 @@ async function main() {
     const hasVnc = args.includes('-vnc');
     const isInXvfb = process.env.XVFB_RUNNING === 'true';
     const isLinux = os.platform() === 'linux';
+
+    // 单实例锁：防止 harness/用户重复启动导致端口互抢、Camoufox 无限拉起
+    const lockPath = path.join(process.cwd(), 'data', '.webai2api-supervisor.lock');
+    try {
+        fs.mkdirSync(path.dirname(lockPath), { recursive: true });
+        if (fs.existsSync(lockPath)) {
+            const oldPid = Number(fs.readFileSync(lockPath, 'utf8').trim());
+            if (oldPid && oldPid !== process.pid) {
+                try {
+                    process.kill(oldPid, 0); // 存活检测
+                    log('ERROR', `检测到另一个 WebAI2API supervisor 正在运行 (PID ${oldPid})。`);
+                    log('ERROR', '为避免端口冲突和浏览器无限重启，本次拒绝启动。请先停止旧实例。');
+                    process.exit(78);
+                } catch { /* 旧进程已死，清理锁 */ }
+            }
+        }
+        fs.writeFileSync(lockPath, String(process.pid), 'utf8');
+        process.on('exit', () => {
+            try {
+                const cur = fs.readFileSync(lockPath, 'utf8').trim();
+                if (cur === String(process.pid)) fs.unlinkSync(lockPath);
+            } catch { /* ignore */ }
+        });
+    } catch (e) {
+        log('WARN', `单实例锁创建失败: ${e.message}（继续启动）`);
+    }
 
     log('INFO', '主进程已启动');
 

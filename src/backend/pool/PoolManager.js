@@ -10,6 +10,7 @@ import { executeWithFailover } from '../strategies/failover.js';
 import { normalizeError } from '../utils/error.js';
 import { Worker } from './Worker.js';
 import { browserShareKey } from '../engine/engineContract.js';
+import { isBrowserUserStopped, resetBrowserStopped, isShuttingDown } from '../engine/launcher.js';
 
 /**
  * PoolManager 类 - 管理 Worker 池
@@ -133,6 +134,50 @@ export class PoolManager {
 
         this.initialized = true;
         logger.info('工作池', `工作池初始化完成，共 ${this.workers.length} 个 Worker 就绪 (${browserMap.size} 个浏览器实例)`);
+    }
+
+    /**
+     * 浏览器是否因用户手动关闭而停止
+     * @returns {boolean}
+     */
+    isBrowserStopped() {
+        return isBrowserUserStopped();
+    }
+
+    /**
+     * 恢复被用户手动关闭的浏览器（WebUI「恢复浏览器」/ POST /admin/browser/restart）
+     * 关闭标记被清除后重新拉起全部 Worker 的浏览器
+     * @returns {Promise<{success: boolean, message: string, workers?: number}>}
+     */
+    async restartBrowser() {
+        if (isShuttingDown()) {
+            return { success: false, message: '服务正在关闭，无法恢复浏览器' };
+        }
+        if (!isBrowserUserStopped()) {
+            return { success: false, message: '浏览器未被手动关闭，无需恢复（如需重建请直接重启服务）' };
+        }
+
+        resetBrowserStopped();
+        logger.info('工作池', '正在恢复被手动关闭的浏览器...');
+
+        const owners = this.workers.filter(w => w._isBrowserOwner || !w._browserOwner);
+        let recovered = 0;
+        const failures = [];
+        for (const owner of owners) {
+            try {
+                await owner._reinit();
+                recovered++;
+            } catch (e) {
+                failures.push(`${owner.name}: ${e.message}`);
+                logger.error('工作池', `[${owner.name}] 恢复浏览器失败: ${e.message}`);
+            }
+        }
+
+        if (failures.length > 0) {
+            return { success: false, message: `部分浏览器恢复失败: ${failures.join('; ')}`, workers: recovered };
+        }
+        logger.info('工作池', `浏览器已恢复（${recovered} 个实例）`);
+        return { success: true, message: '浏览器已恢复', workers: recovered };
     }
 
     /**

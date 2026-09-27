@@ -133,6 +133,21 @@ const handleRequest = createGlobalRouter({
  * @returns {Promise<void>}
  */
 async function startServer() {
+    // 端口预检：被占用则立刻 exit(78)，避免先拉浏览器再无限重启
+    await (async () => {
+        const net = await import('net');
+        await new Promise((resolve) => {
+            const t = net.createServer();
+            t.once('error', (err) => {
+                logger.error('服务器', `端口 ${PORT} 不可用（${err.code || err.message}）。通常已有实例在运行。`);
+                logger.error('服务器', '请先停止旧实例或修改 server.port。本次退出且不会自动重启。');
+                process.exit(78);
+            });
+            t.once('listening', () => t.close(() => resolve()));
+            t.listen(PORT);
+        });
+    })();
+
     // 加载今日统计
     await loadTodayStats();
 
@@ -174,6 +189,15 @@ async function startServer() {
         } else {
             socket.destroy();
         }
+    });
+
+    server.on('error', (err) => {
+        if (err && (err.code === 'EADDRINUSE' || err.code === 'EACCES')) {
+            logger.error('服务器', `端口 ${PORT} 绑定失败（${err.code}），退出以避免无限重启。`);
+            process.exit(78);
+        }
+        logger.error('服务器', `HTTP 服务器错误: ${err.message}`);
+        process.exit(78);
     });
 
     server.listen(PORT, () => {

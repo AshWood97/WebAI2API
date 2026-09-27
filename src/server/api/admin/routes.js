@@ -34,6 +34,7 @@ import {
     validateAdaptersConfig
 } from '../../../config/validator.js';
 import { registry } from '../../../backend/registry.js';
+import { cleanup as cleanupBrowsers } from '../../../backend/engine/launcher.js';
 import { sendRestartSignal, sendStopSignal, isUnderSupervisor, getVncInfo } from '../../../utils/ipc.js';
 import { getTodayStats, getStatsRange, clearStatsRange } from '../../../utils/stats.js';
 import {
@@ -155,12 +156,42 @@ export function createAdminRouter(context) {
                 return;
             }
 
+            // POST /admin/browser/restart - 恢复被手动关闭的浏览器
+            if (method === 'POST' && pathname === '/browser/restart') {
+                const poolContext = queueManager?.getPoolContext?.();
+                const poolManager = poolContext?.poolManager;
+                if (!poolManager || typeof poolManager.restartBrowser !== 'function') {
+                    sendApiError(res, {
+                        code: ERROR_CODES.INTERNAL_ERROR,
+                        message: '工作池未初始化（可能处于安全模式），请先通过 WebUI 重启服务'
+                    });
+                    return;
+                }
+                const result = await poolManager.restartBrowser();
+                if (result.success) {
+                    logger.info('管理器', `浏览器恢复请求完成: ${result.message}`);
+                } else {
+                    logger.warn('管理器', `浏览器恢复请求未执行: ${result.message}`);
+                }
+                sendJson(res, result.success ? 200 : 409, result);
+                return;
+            }
+
             // POST /admin/stop - 停止服务
             if (method === 'POST' && pathname === '/stop') {
                 sendJson(res, 200, { success: true, message: '服务正在停止...' });
-                logger.info('管理器', '收到停止请求，将在 1 秒后退出');
+                logger.info('管理器', '收到停止请求，正在关闭浏览器并退出');
 
-                setTimeout(() => process.exit(0), 1000);
+                    setTimeout(async () => {
+                        try {
+                            // 先置 stopping 标志并关闭浏览器，避免 Worker 的 close
+                            // 处理器把这次关闭判定为崩溃而重新拉起
+                            await cleanupBrowsers();
+                        } catch (e) {
+                            logger.warn('管理器', `关闭浏览器时出错: ${e.message}`);
+                        }
+                        process.exit(0);
+                    }, 1000);
                 return;
             }
 

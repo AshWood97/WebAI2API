@@ -34,9 +34,13 @@ const iconLoading = ref(false);
 const enterIconLoading = () => {
   iconLoading.value = true;
   settingsStore.setToken('');
-  setTimeout(() => {
+  setTimeout(async () => {
     iconLoading.value = false;
-    loginVisible.value = true;
+    // 后端未配置鉴权时，退出登录后无需再次验证
+    const stillValid = await settingsStore.checkAuth().catch(() => false);
+    if (!stillValid) {
+      loginVisible.value = true;
+    }
   }, 500);
 };
 
@@ -376,17 +380,12 @@ onMounted(async () => {
   checkScreenSize();
   window.addEventListener('resize', checkScreenSize);
 
-  // 身份验证
+  // 身份验证：始终探测后端；未配置鉴权时直接放行
   try {
-    if (!settingsStore.token) {
+    const isValid = await settingsStore.checkAuth();
+    if (!isValid) {
+      settingsStore.setToken(''); // 清除无效token
       loginVisible.value = true;
-    } else {
-      // 使用真实API验证
-      const isValid = await settingsStore.checkAuth();
-      if (!isValid) {
-        settingsStore.setToken(''); // 清除无效token
-        loginVisible.value = true;
-      }
     }
   } catch (e) {
     console.error('Auth check failed', e);

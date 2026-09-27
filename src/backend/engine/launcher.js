@@ -47,7 +47,13 @@ let globalBrowserProcess = null;
 let globalContext = null; // 最近一次启动的 context（兼容旧逻辑）
 
 /** 显式生命周期：stopping 后禁止 close handler 自动恢复 */
-const lifecycle = { stopping: false, stopped: false };
+const lifecycle = {
+    stopping: false,
+    stopped: false,
+    // 用户手动关闭了浏览器窗口（仅可能发生在有头模式）：不再自动重建
+    browserUserStopped: false,
+    browserUserStoppedAt: null
+};
 
 /**
  * 是否处于关闭/已关闭状态（Worker 据此禁止 _reinit）
@@ -55,6 +61,50 @@ const lifecycle = { stopping: false, stopped: false };
  */
 export function isShuttingDown() {
     return lifecycle.stopping || lifecycle.stopped;
+}
+
+/**
+ * 用户是否手动关闭了浏览器（有头模式关窗 / Cmd+Q / kill camoufox）
+ * @returns {boolean}
+ */
+export function isBrowserUserStopped() {
+    return lifecycle.browserUserStopped;
+}
+
+/**
+ * 标记浏览器为用户手动关闭：此后 close 事件不再触发自动重建
+ * 无头启动的上下文不经过这里——无头下没有用户能关窗口，close 一律视为崩溃
+ * @returns {boolean} 是否发生了状态变更
+ */
+export function markBrowserUserStopped() {
+    if (lifecycle.browserUserStopped) return false;
+    lifecycle.browserUserStopped = true;
+    lifecycle.browserUserStoppedAt = new Date().toISOString();
+    return true;
+}
+
+/**
+ * 清除手动关闭标记（管理员主动恢复浏览器时调用）
+ * @returns {boolean} 是否发生了状态变更
+ */
+export function resetBrowserStopped() {
+    const was = lifecycle.browserUserStopped;
+    lifecycle.browserUserStopped = false;
+    lifecycle.browserUserStoppedAt = null;
+    return was;
+}
+
+/**
+ * 本次上下文关闭是否应自动重建浏览器
+ * 规则：服务关闭中 / 用户已手动关闭 → 不重建；其余（无头崩溃等）→ 重建
+ * @param {object} [context] - 触发 close 的 context（用于判断是否无头启动）
+ * @returns {boolean}
+ */
+export function shouldAutoRestartOnClose(context) {
+    if (isShuttingDown()) return false;
+    if (lifecycle.browserUserStopped) return false;
+    // 无头启动的上下文不存在"用户手动关闭"，一律按崩溃自愈处理
+    return context?.__webaiHeadless === true;
 }
 
 /**
@@ -360,12 +410,43 @@ export async function initBrowserBase(config, options = {}) {
 }
 
 /**
+ * 在 context 上附加启动元数据
+ * __webaiHeadless 供 shouldAutoRestartOnClose 区分"用户关窗"与"无头崩溃"
+ * @private
+ */
+function attachContextMeta(context, headlessMode) {
+    if (!context) return;
+    try {
+        context.__webaiHeadless = headlessMode === true;
+    } catch { /* frozen object: 降级为未知，按崩溃处理 */ }
+}
+
+/**
+ * 尽力获取 Playwright context 背后的浏览器进程句柄
+ * persistent context 由库内部 spawn，Node 侧拿不到 ChildProcess；
+ * 仅 Camoufox 的 launchPersistentContext 返回值可能暴露 _browserProcess
+ * @returns {import('child_process').ChildProcess|null}
+ * @private
+ */
+function resolveBrowserProcess(context) {
+    try {
+        return context?._browserProcess || context?.browser?.()?._browserProcess || null;
+    } catch {
+        return null;
+    }
+}
+
+/**
  * 注册活动 context 并绑定 close 清理
  * @private
  */
 function trackContext(context, markLabel) {
     activeContexts.add(context);
     globalContext = context;
+    const browserProcess = resolveBrowserProcess(context);
+    if (browserProcess) {
+        globalBrowserProcess = browserProcess;
+    }
     context.on('close', async () => {
         logger.warn('浏览器', `[${markLabel}] 浏览器已断开连接`);
         activeContexts.delete(context);
@@ -530,10 +611,11 @@ async function launchCamoufoxBase({ config, userDataDir, proxyConfig, markLabel,
         camoufoxLaunchOptions.proxy = proxyObj;
     }
 
-    if (isShuttingDown()) {
+    if (isShuttingDown() || isBrowserUserStopped()) {
         throw new Error('服务正在关闭，取消启动浏览器');
     }
     const context = await Camoufox(camoufoxLaunchOptions);
+    attachContextMeta(context, headlessMode);
     trackContext(context, markLabel);
 
     const statusParts = [];
@@ -606,6 +688,7 @@ async function launchClearcoteBase({ config, userDataDir, proxyConfig, markLabel
         const { __meta: launchMeta, ...sdkOptions } = launchOptions;
 
         context = await clearcoteSdk.launchPersistentContext(userDataDir, sdkOptions);
+        attachContextMeta(context, headlessMode);
         trackContext(context, markLabel);
         if (proxyHandle) {
             bindProxyReleaseToContext(context, proxyHandle);

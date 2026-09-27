@@ -296,6 +296,21 @@ console.log('\n[10] launcher syntax / exports');
     assert('initBrowserBase exported', typeof launcher.initBrowserBase === 'function');
     assert('cleanup exported', typeof launcher.cleanup === 'function');
     assert('shouldUseGhostCursor re-exported', typeof launcher.shouldUseGhostCursor === 'function');
+    // 手动关闭生命周期（浏览器关窗不再自动重启）
+    assert('isBrowserUserStopped exported', typeof launcher.isBrowserUserStopped === 'function');
+    assert('markBrowserUserStopped exported', typeof launcher.markBrowserUserStopped === 'function');
+    assert('resetBrowserStopped exported', typeof launcher.resetBrowserStopped === 'function');
+    assert('shouldAutoRestartOnClose exported', typeof launcher.shouldAutoRestartOnClose === 'function');
+    assert('isShuttingDown still exported', typeof launcher.isShuttingDown === 'function');
+
+    launcher.resetBrowserStopped();
+    assert('headless close treated as crash', launcher.shouldAutoRestartOnClose({ __webaiHeadless: true }) === true);
+    assert('headed close not a crash', launcher.shouldAutoRestartOnClose({ __webaiHeadless: false }) === false);
+    launcher.markBrowserUserStopped();
+    assert('user stop suppresses restart', launcher.shouldAutoRestartOnClose({ __webaiHeadless: true }) === false);
+    assert('isBrowserUserStopped reflects state', launcher.isBrowserUserStopped() === true);
+    launcher.resetBrowserStopped();
+    assert('reset restores auto-restart', launcher.shouldAutoRestartOnClose({ __webaiHeadless: true }) === true);
 }
 
 console.log(`\n结果: ${passed} passed, ${failed} failed\n`);

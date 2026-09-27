@@ -115,6 +115,28 @@ export const useSystemStore = defineStore('system', {
                 message.error('停止请求失败');
                 return false;
             }
+        },
+
+        // 恢复被手动关闭的浏览器
+        async restartBrowser() {
+            const settingsStore = useSettingsStore();
+            try {
+                const response = await fetch('/admin/browser/restart', {
+                    method: 'POST',
+                    headers: settingsStore.getHeaders()
+                });
+                const data = await response.json();
+                if (response.ok && data.success) {
+                    message.success(data.message || '浏览器已恢复');
+                    return true;
+                } else {
+                    message.warning(data.message || '无需恢复浏览器');
+                    return false;
+                }
+            } catch (error) {
+                message.error('恢复浏览器请求失败');
+                return false;
+            }
         }
     }
 });

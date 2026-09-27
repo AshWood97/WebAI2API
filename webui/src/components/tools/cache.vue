@@ -12,7 +12,8 @@ import {
     FolderOutlined,
     StopOutlined,
     LoginOutlined,
-    DownOutlined
+    DownOutlined,
+    ReloadOutlined
 } from '@ant-design/icons-vue';
 
 const systemStore = useSystemStore();
@@ -63,6 +64,38 @@ const workers = ref([]);
 const restartConfirmVisible = ref(false);
 const pendingRestartOptions = ref({});
 
+// 浏览器是否被用户手动关闭（关闭窗口后不会再自动重启，需手动恢复）
+const browserStopped = ref(false);
+const restoringBrowser = ref(false);
+
+// 获取浏览器运行状态（/v1/runtime/status 需要 API 认证）
+const fetchBrowserStatus = async () => {
+    try {
+        const res = await fetch('/v1/runtime/status', {
+            headers: settingsStore.getHeaders()
+        });
+        if (res.ok) {
+            const data = await res.json();
+            browserStopped.value = data?.browser?.userStopped === true;
+        }
+    } catch (e) {
+        // 忽略：状态探测失败不影响其他功能
+    }
+};
+
+// 恢复被手动关闭的浏览器
+const handleRestoreBrowser = async () => {
+    restoringBrowser.value = true;
+    try {
+        const success = await systemStore.restartBrowser();
+        if (success) {
+            browserStopped.value = false;
+        }
+    } finally {
+        restoringBrowser.value = false;
+    }
+};
+
 // 获取 workers 列表
 const fetchWorkers = async () => {
     try {
@@ -99,6 +132,7 @@ const confirmRestart = () => {
 
 onMounted(() => {
     fetchWorkers();
+    fetchBrowserStatus();
 });
 
 // 辅助函数：延迟
@@ -287,6 +321,15 @@ const handleDeleteSelectedFolders = async () => {
                                 </a-menu>
                             </template>
                         </a-dropdown-button>
+
+                        <a-tooltip v-if="browserStopped" title="浏览器已被手动关闭，不会再自动重启；点击可重新拉起浏览器">
+                            <a-button type="primary" size="large" :loading="restoringBrowser" @click="handleRestoreBrowser">
+                                <template #icon>
+                                    <ReloadOutlined />
+                                </template>
+                                恢复浏览器
+                            </a-button>
+                        </a-tooltip>
 
                         <a-popconfirm ok-text="确定" cancel-text="取消" @confirm="handleStop" placement="topRight">
                             <template #title>

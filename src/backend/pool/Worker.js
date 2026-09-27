@@ -5,7 +5,7 @@
 
 import fs from 'fs';
 import { logger } from '../../utils/logger.js';
-import { initBrowserBase, createCursor, shouldUseGhostCursor, isShuttingDown } from '../engine/launcher.js';
+import { initBrowserBase, createCursor, shouldUseGhostCursor, isShuttingDown, isBrowserUserStopped, markBrowserUserStopped, shouldAutoRestartOnClose } from '../engine/launcher.js';
 import { normalizeEngine } from '../engine/engineContract.js';
 import { registry } from '../registry.js';
 import { tryGotoWithCheck } from '../utils/page.js';
@@ -152,6 +152,10 @@ export class Worker {
         if (!this.page) return;
 
         this.page.on('close', async () => {
+            // 服务关闭 / 浏览器已被用户手动关闭时不再重建标签页
+            if (isShuttingDown() || isBrowserUserStopped()) {
+                return;
+            }
             // 如果浏览器还在运行，说明只是标签页被关闭
             if (this.browser && !this.browser.isClosed?.()) {
                 logger.warn('工作池', `[${this.name}] 标签页已关闭，正在重新创建...`);
@@ -252,6 +256,24 @@ export class Worker {
                     this.initialized = false;
                     this.browser = null;
                     this.page = null;
+                    return;
+                }
+
+                // 有头模式下用户手动关窗（Cmd+Q / 点 X / kill camoufox）：
+                // 尊重用户意图，不再自动拉起。无头启动的 context 不存在"手动关闭"，
+                // 一律按崩溃自愈处理（shouldAutoRestartOnClose 内部判定）。
+                if (!shouldAutoRestartOnClose(browserInstance)) {
+                    markBrowserUserStopped();
+                    logger.warn('工作池', `[${this.name}] 浏览器已被手动关闭，已停止自动重启`);
+                    logger.info('工作池', `[${this.name}] 如需恢复：WebUI「恢复浏览器」或 POST /admin/browser/restart，也可直接重启服务`);
+                    this.initialized = false;
+                    this.browser = null;
+                    this.page = null;
+                    for (const sharedWorker of this._sharedWorkers) {
+                        sharedWorker.initialized = false;
+                        sharedWorker.browser = null;
+                        sharedWorker.page = null;
+                    }
                     return;
                 }
 
@@ -481,6 +503,11 @@ export class Worker {
      * @private
      */
     async _executeAdapter(ctx, type, modelId, prompt, paths, meta) {
+        // 用户手动关闭浏览器后不自动重建，明确报错引导恢复
+        if (isBrowserUserStopped()) {
+            logger.info('工作池', `[${this.name}] 浏览器已被手动关闭，跳过自动重新初始化`, meta);
+            return { error: `Worker [${this.name}] 浏览器已被手动关闭，请通过 POST /admin/browser/restart 或重启服务恢复` };
+        }
         // 检查 Worker 是否已初始化（浏览器崩溃后会被标记为 false）
         if (!this.initialized || !this.page || this.page.isClosed()) {
             logger.info('工作池', `[${this.name}] 浏览器已断开，正在自动重新初始化...`, meta);
@@ -538,9 +565,9 @@ export class Worker {
      * @private
      */
     async _doReinit() {
-        // 服务关闭中禁止重建
-        if (isShuttingDown()) {
-            logger.warn('工作池', `[${this.name}] 服务正在关闭，跳过浏览器重建`);
+        // 服务关闭中 / 用户手动关闭时禁止重建
+        if (isShuttingDown() || isBrowserUserStopped()) {
+            logger.warn('工作池', `[${this.name}] 浏览器不可用（服务关闭或已被手动关闭），跳过重建`);
             return;
         }
 

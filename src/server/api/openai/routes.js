@@ -88,6 +88,7 @@ export function createOpenAIRouter(context) {
             instance: w.instanceName || null,
             engine: w.engine || normalizeEngine(config?.browser?.engine),
             userDataDir: w.userDataDir || null,
+            stopped: w.initialized === false,
             runtime: w.runtime || null
         }));
 
@@ -133,6 +134,8 @@ export function createOpenAIRouter(context) {
                 defaultEngine: normalizeEngine(config?.browser?.engine),
                 engines,
                 clearcoteSdk: engines.includes('clearcote') ? (readClearcoteSdkVersion() || null) : null,
+                // 浏览器被用户手动关闭：需 POST /admin/browser/restart 或重启服务恢复
+                userStopped: !!poolContext?.poolManager?.isBrowserStopped?.(),
                 workers: workerBrowser
             },
             keepaliveMode: config?.server?.keepalive?.mode || 'comment',
