@@ -100,7 +100,7 @@ node --test bridge/browser-runtime.test.mjs   # 13 项通用桥协议测试
 
 集成测试覆盖旧 mock 桥兼容与通用浏览器 RPC 到 Rust 适配器的 HTTP 生成链路，
 以及安全模式、桥崩溃回收、并发配置、媒体清理、锁互斥和启动期间 SIGTERM。
-CI 另在 Linux Docker 镜像中启动并关闭真实 Camoufox、检查 HTTP 与 WebUI。
+CI 另在 Linux Docker 镜像中启动并关闭真实 Camoufox 与 Clearcote、检查默认入口的 HTTP 与 WebUI。
 
 CI：`.github/workflows/rust-ci.yml` 运行 `cargo fmt --check`、
 `cargo clippy --all-targets -- -D warnings`、`cargo test`、release 构建、版本检查与 Docker 冒烟。
