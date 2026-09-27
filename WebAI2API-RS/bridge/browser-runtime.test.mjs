@@ -238,6 +238,23 @@ test('page-scoped polling ignores unrelated page overflow but detects own loss',
     await runtime.shutdown();
 });
 
+test('runtime emits page and browser closure events for Rust lifecycle recovery', async () => {
+    const { runtime } = fixture();
+    const { browserId } = await runtime.browserStart();
+    const { pageId } = await runtime.pageCreate({ browserId });
+    const cursor = runtime.eventSeq;
+    await runtime.pages.get(pageId).page.close();
+    const pageEvents = runtime.eventPoll({ afterSequence: cursor }).events;
+    assert.ok(pageEvents.some(event => event.type === 'page.closed' && event.pageId === pageId));
+    assert.equal(runtime.browsers.get(browserId).pages.has(pageId), false);
+
+    const beforeBrowserClose = runtime.eventSeq;
+    await runtime.browsers.get(browserId).context.close();
+    const closeEvents = runtime.eventPoll({ afterSequence: beforeBrowserClose }).events;
+    assert.ok(closeEvents.some(event => event.type === 'browser.closed' && event.browserId === browserId));
+    await runtime.shutdown();
+});
+
 test('route timeout defaults to continue and resolves opaque route token', async () => {
     const { runtime } = fixture({ routeTimeoutMs: 50 });
     const { browserId } = await runtime.browserStart();

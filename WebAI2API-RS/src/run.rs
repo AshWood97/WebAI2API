@@ -435,7 +435,14 @@ pub async fn run_server(
                 let _ = child.wait().await;
                 return Err(RunError::Fatal(format!("启动预检失败: {error}")));
             }
-            match RustRuntime::initialize(rpc.clone(), config.clone(), temp_dir.clone()).await {
+            match RustRuntime::initialize_login(
+                rpc.clone(),
+                config.clone(),
+                temp_dir.clone(),
+                opts.login.as_deref(),
+            )
+            .await
+            {
                 Ok(runtime) => {
                     let snapshot = runtime.worker_snapshot();
                     Ok((

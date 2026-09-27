@@ -739,13 +739,19 @@ async fn runtime_status(state: &AppState) -> Response {
     let sys = crate::metrics::system_status(state);
     let engines = referenced_engine_names(&state.config);
     let typed = crate::typed::Config::from_value(&state.config);
-    let worker_snapshot = state.workers.lock().unwrap().clone();
+    let worker_snapshot = state
+        .bridge
+        .worker_snapshot()
+        .unwrap_or_else(|| state.workers.lock().unwrap().clone());
     let workers_arr = worker_snapshot
         .get("workers")
         .and_then(Value::as_array)
         .cloned()
         .unwrap_or_default();
-    let browser_stopped = *state.browser_stopped.lock().unwrap();
+    let browser_stopped = workers_arr
+        .iter()
+        .any(|worker| worker.get("stopped") == Some(&json!(true)))
+        || *state.browser_stopped.lock().unwrap();
     // 与 Node 原版对齐：runtime 字段名改为 instance/runtime/stopped，去掉桥内部字段
     let workers = workers_arr
         .iter()
@@ -804,7 +810,10 @@ async fn runtime_status(state: &AppState) -> Response {
 
 async fn auth_status(state: &AppState) -> Response {
     // 与 Node 的 getPoolContext() 一样只读缓存快照，不重复触发 init
-    let snapshot = state.workers.lock().unwrap().clone();
+    let snapshot = state
+        .bridge
+        .worker_snapshot()
+        .unwrap_or_else(|| state.workers.lock().unwrap().clone());
     let pool_ready = state.safe_mode.lock().unwrap().is_none();
     let mut workers: Vec<Value> = snapshot
         .get("workers")
@@ -915,6 +924,10 @@ async fn cookies(state: &AppState, query: &str) -> Response {
         .await
     {
         Ok(v) => json_response(200, v),
+        Err(e) if e.to_string().contains("浏览器实例不存在") => json_response(
+            404,
+            json!({"error":{"message":e.to_string(),"type":"invalid_request_error","code":"NOT_FOUND"}}),
+        ),
         Err(e)
             if e.to_string().contains("Worker 不存在")
                 || e.to_string().contains("Worker not found") =>
