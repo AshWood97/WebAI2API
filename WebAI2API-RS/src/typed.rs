@@ -171,10 +171,14 @@ pub struct FailoverConfig {
 }
 
 impl Config {
-    /// 从 load_config() 的 Value 解析。类型不匹配的字段静默落 None
-    /// （加载器已先行校验硬错误，此处只做类型化读取）。
+    /// 显式解析接口；字段类型不匹配时返回错误。
+    pub fn try_from_value(v: &Value) -> Result<Self, serde_json::Error> {
+        serde_json::from_value(v.clone())
+    }
+
+    /// 兼容旧调用方的便捷视图。配置加载路径使用 `try_from_value` 拒绝类型错误。
     pub fn from_value(v: &Value) -> Self {
-        serde_json::from_value(v.clone()).unwrap_or_default()
+        Self::try_from_value(v).unwrap_or_default()
     }
 
     /// 合并 extra 后写回为 Value（保留未建模字段与键顺序）。

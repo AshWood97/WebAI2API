@@ -362,28 +362,8 @@ pub async fn delete_ids(ids: &[String]) -> Result<usize, HistoryError> {
     blocking(move || {
         let h = db_snapshot()?;
         let conn = h.conn.lock().unwrap();
-        let placeholders = vec!["?"; ids.len()].join(",");
-        let mut stmt = conn.prepare(&format!(
-            "SELECT response_media FROM requests WHERE id IN ({placeholders})"
-        ))?;
-        let media_rows = stmt.query_map(rusqlite::params_from_iter(ids.iter()), |r| {
-            r.get::<_, Option<String>>(0)
-        })?;
-        for row in media_rows.flatten().flatten() {
-            if let Ok(v) = serde_json::from_str::<Value>(&row) {
-                let items = v.as_array().cloned().unwrap_or_default();
-                for item in items {
-                    if let Some(p) = item.get("localPath").and_then(Value::as_str) {
-                        let _ = fs::remove_file(p);
-                    }
-                }
-            }
-        }
-        conn.execute(
-            &format!("DELETE FROM requests WHERE id IN ({placeholders})"),
-            rusqlite::params_from_iter(ids.iter()),
-        )
-        .map_err(HistoryError::from)
+        delete_media_for_ids(&conn, &h.media_dir, &ids)?;
+        delete_ids_locked(&conn, &ids)
     })
     .await
 }
@@ -407,6 +387,7 @@ pub async fn delete_by_date_range(start: &str, end: &str) -> Result<usize, Histo
             .query_map(rusqlite::params_from_iter(params.iter()), |r| r.get(0))?
             .collect::<Result<Vec<_>, _>>()?;
         drop(stmt);
+        delete_media_for_ids(&conn, &h.media_dir, &ids)?;
         delete_ids_locked(&conn, &ids)
     })
     .await
@@ -422,6 +403,37 @@ fn delete_ids_locked(conn: &Connection, ids: &[String]) -> Result<usize, History
         rusqlite::params_from_iter(ids.iter()),
     )
     .map_err(HistoryError::from)
+}
+
+fn delete_media_for_ids(
+    conn: &Connection,
+    media_dir: &Path,
+    ids: &[String],
+) -> Result<(), HistoryError> {
+    if ids.is_empty() {
+        return Ok(());
+    }
+    let placeholders = vec!["?"; ids.len()].join(",");
+    let mut stmt = conn.prepare(&format!(
+        "SELECT response_media FROM requests WHERE id IN ({placeholders})"
+    ))?;
+    let media_rows = stmt.query_map(rusqlite::params_from_iter(ids.iter()), |r| {
+        r.get::<_, Option<String>>(0)
+    })?;
+    for row in media_rows.flatten().flatten() {
+        if let Ok(Value::Array(items)) = serde_json::from_str::<Value>(&row) {
+            for item in items {
+                if let Some(path) = item.get("localPath").and_then(Value::as_str) {
+                    let path = Path::new(path);
+                    // Only remove media managed by this history database.
+                    if path.parent() == Some(media_dir) {
+                        let _ = fs::remove_file(path);
+                    }
+                }
+            }
+        }
+    }
+    Ok(())
 }
 
 pub fn media_dir() -> Option<PathBuf> {
@@ -532,6 +544,41 @@ mod tests {
         assert_eq!(models().await.unwrap(), vec!["gemini".to_string()]);
         assert_eq!(delete_ids(&["r1".to_string()]).await.unwrap(), 1);
         assert!(detail("r1").await.unwrap().is_none());
+
+        create_record(&NewRecord {
+            id: "r2",
+            model_id: None,
+            model_name: None,
+            prompt: "media",
+            input_images: None,
+            is_streaming: false,
+        })
+        .await
+        .unwrap();
+        let media = save_data_uri("data:image/png;base64,aGVsbG8=", "r2")
+            .await
+            .unwrap();
+        let media_path = PathBuf::from(media["localPath"].as_str().unwrap());
+        let media_json = serde_json::json!([media]).to_string();
+        update_record(
+            "r2",
+            &RecordUpdate {
+                status: Some("success"),
+                response_text: None,
+                reasoning_content: None,
+                response_media: Some(&media_json),
+                error_message: None,
+                duration_ms: None,
+            },
+        )
+        .await
+        .unwrap();
+        let today = chrono::Local::now().format("%Y-%m-%d").to_string();
+        assert_eq!(delete_by_date_range(&today, &today).await.unwrap(), 1);
+        assert!(
+            !media_path.exists(),
+            "date deletion should remove media file"
+        );
         let _ = fs::remove_dir_all(&dir);
     }
 }

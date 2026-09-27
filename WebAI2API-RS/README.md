@@ -42,6 +42,9 @@ cargo build --release
 # 登录模式、虚拟显示与原版参数一致
 ./target/release/webai2api --src-root .. -login=workerName
 ./target/release/webai2api --src-root .. -xvfb -vnc      # 仅 Linux
+
+# 指定独立状态目录；配置、用户配置文件、日志、历史和临时文件都写入此处
+./target/release/webai2api --src-root .. --data-dir /var/lib/webai2api
 ```
 
 生成密钥：`./target/release/webai2api-genkey`，输出 `sk-` 加 48 位十六进制。
@@ -52,9 +55,12 @@ cargo build --release
 
 ## 兼容性
 
-- 直接读取原仓库的 `data/config.yaml`，默认值、校验文案、退出码与原版一致。
+- 默认读取原仓库的 `data/config.yaml`；指定 `--data-dir` 后从该目录读取配置，
+  并将用户配置文件、日志、历史和临时文件都放在该目录。Node 桥通过工作目录中的
+  `data` 链接读取同一份配置和状态，不需要改动原 Node 源码。
 - `data/history/history.db` 表结构不变，可直接打开原有数据库。
-- WebUI 使用原仓库 `webui/dist` 的构建产物（`webui-dist` 符号链接）。
+- WebUI 从 checkout 内 `webui/dist` 加载，开发与新 checkout 无需 `webui-dist` 符号链接；
+  也可用 `WEBAI2API_WEBUI_DIR` 显式指定构建目录。
 - 保留原版的已知行为：非流式 429 文案里的队列上限显示为 `undefined`、
   `/v1/chat/completions` 前缀匹配、流式请求不受队列上限约束。
 - 配置写回是合并式的：只更新提交的键，其余键保留。YAML 注释仍会在写回时丢失，
@@ -64,7 +70,7 @@ cargo build --release
 ## 测试
 
 ```bash
-cargo test            # 42 个测试：单元 + 集成（mock 引擎桥驱动完整服务）
+cargo test            # 43 个单元测试 + 5 个集成测试（mock 引擎桥驱动完整服务）
 ```
 
 集成测试在进程内用 `bridge/mock-bridge.mjs` 起完整服务，覆盖：端点与生成链路、

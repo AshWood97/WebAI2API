@@ -26,8 +26,8 @@ fn mock_bridge_path() -> PathBuf {
 }
 
 fn write_config(dir: &Path, body: &str) {
-    std::fs::create_dir_all(dir.join("data")).unwrap();
-    std::fs::write(dir.join("data/config.yaml"), body).unwrap();
+    std::fs::create_dir_all(dir).unwrap();
+    std::fs::write(dir.join("config.yaml"), body).unwrap();
 }
 
 fn single_worker_config(port: u16, tag: &str) -> String {
@@ -106,7 +106,7 @@ async fn endpoints_generation_and_graceful_stop() {
     let cfg = temp_dir("cfg1");
     let data = temp_dir("data1");
     let port = free_port();
-    write_config(&cfg, &single_worker_config(port, &worker_tag(port)));
+    write_config(&data, &single_worker_config(port, &worker_tag(port)));
 
     let handle = run::supervise(base_opts(&cfg, &data)).await;
     wait_ready(port).await;
@@ -214,7 +214,7 @@ async fn endpoints_generation_and_graceful_stop() {
     )
     .await;
     assert_eq!(status, 200, "{body}");
-    let yaml = std::fs::read_to_string(cfg.join("data/config.yaml")).unwrap();
+    let yaml = std::fs::read_to_string(data.join("config.yaml")).unwrap();
     assert!(yaml.contains("queueBuffer: 4"), "配置应已写回: {yaml}");
 
     // 停机：锁文件清理
@@ -233,7 +233,7 @@ async fn safe_mode_returns_503() {
     let cfg = temp_dir("cfg2");
     let data = temp_dir("data2");
     let port = free_port();
-    write_config(&cfg, &single_worker_config(port, &worker_tag(port)));
+    write_config(&data, &single_worker_config(port, &worker_tag(port)));
 
     let mut opts = base_opts(&cfg, &data);
     opts.extra_envs = vec![("MOCK_INIT_FAIL".to_string(), "1".to_string())];
@@ -274,7 +274,7 @@ async fn bridge_crash_triggers_auto_restart() {
     let cfg = temp_dir("cfg3");
     let data = temp_dir("data3");
     let port = free_port();
-    write_config(&cfg, &single_worker_config(port, &worker_tag(port)));
+    write_config(&data, &single_worker_config(port, &worker_tag(port)));
 
     let handle = run::supervise(base_opts(&cfg, &data)).await;
     wait_ready(port).await;
@@ -317,7 +317,7 @@ async fn queue_full_rejects_non_streaming_with_429() {
     let port = free_port();
     // queueBuffer=2、maxConcurrent=1（1 个 worker）→ 非流式上限 3
     write_config(
-        &cfg,
+        &data,
         &format!(
             r#"
 server: {{ port: {port}, auth: "" }}

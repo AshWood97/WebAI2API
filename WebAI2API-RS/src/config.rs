@@ -33,13 +33,17 @@ impl std::fmt::Display for ConfigError {
 
 /// 解析配置路径：data/config.yaml > 根目录 config.yaml（自动迁移）> 从 example 复制。
 pub fn resolve_config_path(root: &Path) -> Result<PathBuf, ConfigError> {
-    let data_cfg = root.join("data/config.yaml");
+    resolve_config_path_in(root, &root.join("data"))
+}
+
+pub fn resolve_config_path_in(root: &Path, data_dir: &Path) -> Result<PathBuf, ConfigError> {
+    let data_cfg = data_dir.join("config.yaml");
     if data_cfg.exists() {
         return Ok(data_cfg);
     }
     let root_cfg = root.join("config.yaml");
     if root_cfg.exists() {
-        fs::create_dir_all(root.join("data")).ok();
+        fs::create_dir_all(data_dir).ok();
         fs::rename(&root_cfg, &data_cfg)
             .map_err(|e| ConfigError(format!("迁移 config.yaml 失败: {e}")))?;
         crate::logfmt::info("配置器", "已将 config.yaml 迁移到 data/config.yaml");
@@ -47,7 +51,7 @@ pub fn resolve_config_path(root: &Path) -> Result<PathBuf, ConfigError> {
     }
     let example = root.join("config.example.yaml");
     if example.exists() {
-        fs::create_dir_all(root.join("data")).ok();
+        fs::create_dir_all(data_dir).map_err(|e| ConfigError(format!("创建数据目录失败: {e}")))?;
         fs::copy(&example, &data_cfg).map_err(|e| ConfigError(format!("复制示例配置失败: {e}")))?;
         crate::logfmt::info("配置器", "已从 config.example.yaml 生成 data/config.yaml");
         return Ok(data_cfg);
@@ -168,7 +172,11 @@ fn obj_mut<'a>(root: &'a mut Value, key: &str) -> &'a mut Map<String, Value> {
 
 /// 加载、补默认值、校验并扁平化。返回的 JSON 结构与 JS 版 loadConfig() 一致。
 pub fn load_config(root: &Path) -> Result<Value, ConfigError> {
-    let path = resolve_config_path(root)?;
+    load_config_in(root, &root.join("data"))
+}
+
+pub fn load_config_in(root: &Path, data_dir: &Path) -> Result<Value, ConfigError> {
+    let path = resolve_config_path_in(root, data_dir)?;
     let text = fs::read_to_string(&path).map_err(|e| ConfigError(format!("读取配置失败: {e}")))?;
     let yaml_value: serde_yaml::Value = serde_yaml::from_str(&text)
         .map_err(|e| ConfigError(format!("配置文件解析失败: {path:?}: {e}")))?;
@@ -205,6 +213,8 @@ pub fn load_config(root: &Path) -> Result<Value, ConfigError> {
         }
         None => return Err(ConfigError("配置文件缺少必需字段: server.port".to_string())),
     }
+    crate::typed::Config::try_from_value(&config)
+        .map_err(|e| ConfigError(format!("配置字段类型无效: {e}")))?;
     match config.pointer("/server/auth").and_then(Value::as_str) {
         None | Some("") => {
             crate::logfmt::warn(
@@ -367,8 +377,7 @@ pub fn load_config(root: &Path) -> Result<Value, ConfigError> {
         }
     };
     let global_proxy = config.pointer("/browser/proxy").cloned();
-    let data_dir = root.join("data");
-    let workers = flatten_instances(&instances, global_proxy.as_ref(), &engine, &data_dir)?;
+    let workers = flatten_instances(&instances, global_proxy.as_ref(), &engine, data_dir)?;
 
     let has_gemini_biz = workers.iter().any(|w| {
         w["type"] == "gemini_biz"
@@ -671,5 +680,32 @@ backend:
         assert_eq!(cfg.pointer("/server/keepalive/mode").unwrap(), "comment");
         assert_eq!(cfg.pointer("/backend/pool/strategy").unwrap(), "least_busy");
         let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn custom_data_dir_and_typed_auth_errors_are_explicit() {
+        let root = std::env::temp_dir().join(format!("webai2api-root-{}", std::process::id()));
+        let data = std::env::temp_dir().join(format!("webai2api-data-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&root);
+        let _ = fs::remove_dir_all(&data);
+        fs::create_dir_all(&data).unwrap();
+        fs::write(
+            data.join("config.yaml"),
+            "server: { port: 3000, auth: 'sk-custom-auth-123' }\nbackend: { pool: { instances: [{ name: main, workers: [{ name: w, type: mock }] }] } }\n",
+        )
+        .unwrap();
+        let cfg = load_config_in(&root, &data).unwrap();
+        assert_eq!(cfg["server"]["auth"], "sk-custom-auth-123");
+
+        fs::write(
+            data.join("config.yaml"),
+            "server: { port: 3000, auth: 1234567890 }\nbackend: { pool: { instances: [{ name: main, workers: [{ name: w, type: mock }] }] } }\n",
+        )
+        .unwrap();
+        let error = load_config_in(&root, &data).unwrap_err();
+        assert!(error.0.contains("配置字段类型无效"), "{}", error.0);
+        assert!(error.0.contains("string"), "{}", error.0);
+        let _ = fs::remove_dir_all(&root);
+        let _ = fs::remove_dir_all(&data);
     }
 }

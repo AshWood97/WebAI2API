@@ -14,6 +14,14 @@ use tokio::sync::{mpsc, oneshot};
 
 type ReplyTx = oneshot::Sender<Result<Value, BridgeError>>;
 
+struct ProcessGroupGuard(u32);
+
+impl Drop for ProcessGroupGuard {
+    fn drop(&mut self) {
+        crate::run::kill_tree(self.0);
+    }
+}
+
 struct BridgeInner {
     /// UnboundedSender 本身 Clone+Send，无需 Mutex 包装
     writer: mpsc::UnboundedSender<String>,
@@ -316,6 +324,29 @@ pub async fn spawn_bridge(
         std::fs::remove_file(sock).ok();
     }
     let mut cmd = tokio::process::Command::new(node_bin);
+    let data_dir = temp_dir
+        .parent()
+        .map(PathBuf::from)
+        .unwrap_or_else(|| src_root.join("data"));
+    std::fs::create_dir_all(&data_dir).map_err(|e| BridgeError::Spawn { source: e })?;
+    let data_dir = data_dir
+        .canonicalize()
+        .map_err(|e| BridgeError::Spawn { source: e })?;
+    let bridge_cwd = temp_dir.join("bridge-cwd");
+    std::fs::create_dir_all(&bridge_cwd).map_err(|e| BridgeError::Spawn { source: e })?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::symlink;
+        let data_link = bridge_cwd.join("data");
+        let link_is_current = std::fs::read_link(&data_link).is_ok_and(|target| target == data_dir);
+        if !link_is_current {
+            if std::fs::symlink_metadata(&data_link).is_ok_and(|meta| meta.file_type().is_symlink())
+            {
+                std::fs::remove_file(&data_link).map_err(|e| BridgeError::Spawn { source: e })?;
+            }
+            symlink(data_dir, &data_link).map_err(|e| BridgeError::Spawn { source: e })?;
+        }
+    }
     cmd.arg(bridge_script)
         .env("WEBAI2API_SRC_ROOT", src_root)
         .env("WEBAI2API_SOCK", sock)
@@ -325,8 +356,9 @@ pub async fn spawn_bridge(
         .env("WEBAI2API_TEMP_DIR", temp_dir)
         // 日志以 Rust 侧为唯一出口：抑制桥内 logger.js 的 console 重复输出
         .env("WEBAI2API_BRIDGE_QUIET", "1")
-        // 桥 import 的原仓库配置器用 process.cwd() 找 data/config.yaml，必须跟 --src-root
-        .current_dir(src_root)
+        // 原 Node 配置器和后端按 process.cwd()/data 定位状态。用临时工作目录
+        // 将 data 链接到 Rust 的唯一数据目录，同时保持源代码通过绝对路径导入。
+        .current_dir(&bridge_cwd)
         .stdout(std::process::Stdio::inherit())
         .stderr(std::process::Stdio::inherit())
         .kill_on_drop(true);
@@ -345,6 +377,7 @@ pub async fn spawn_bridge(
         });
     }
     let child = cmd.spawn().map_err(|e| BridgeError::Spawn { source: e })?;
+    let mut process_group_guard = ProcessGroupGuard(child.id().unwrap_or(0));
 
     // 等待 socket 文件出现（桥 listen 之后）
     for _ in 0..100 {
@@ -386,6 +419,7 @@ pub async fn spawn_bridge(
         .await
         .map_err(|_| BridgeError::ReadyTimeout)?
         .map_err(|_| BridgeError::ReadyChannelClosed)?;
+    process_group_guard.0 = 0;
     Ok((child, bridge))
 }
 

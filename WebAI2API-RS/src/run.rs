@@ -200,7 +200,14 @@ pub async fn watchdog(opts: StartOptions) -> ! {
                     "看门狗",
                     &format!("{msg}，将自动重启 ({restarts}/{MAX_AUTO_RESTARTS})"),
                 );
-                tokio::time::sleep(Duration::from_millis(1000)).await;
+                tokio::select! {
+                    _ = tokio::time::sleep(Duration::from_millis(1000)) => {},
+                    _ = shutdown_signal() => {
+                        helpers.terminate().await;
+                        release_lock(&opts.data_dir);
+                        std::process::exit(0);
+                    }
+                }
             }
             Err(RunError::RestartWith(new_args)) => {
                 login = new_args.into_iter().find_map(|a| {
@@ -210,7 +217,14 @@ pub async fn watchdog(opts: StartOptions) -> ! {
                 });
                 restarts = 0;
                 logfmt::info("看门狗", "正在重启子服务...");
-                tokio::time::sleep(Duration::from_millis(500)).await;
+                tokio::select! {
+                    _ = tokio::time::sleep(Duration::from_millis(500)) => {},
+                    _ = shutdown_signal() => {
+                        helpers.terminate().await;
+                        release_lock(&opts.data_dir);
+                        std::process::exit(0);
+                    }
+                }
             }
         }
     }
@@ -278,7 +292,10 @@ pub async fn supervise(opts: StartOptions) -> SuperviseHandle {
                         "看门狗",
                         &format!("{msg}，将自动重启 ({restarts}/{MAX_AUTO_RESTARTS})"),
                     );
-                    tokio::time::sleep(Duration::from_millis(300)).await;
+                    tokio::select! {
+                        _ = tokio::time::sleep(Duration::from_millis(300)) => {},
+                        _ = stop_rx.recv() => break,
+                    }
                 }
                 Err(RunError::RestartWith(new_args)) => {
                     login = new_args.into_iter().find_map(|a| {
@@ -288,7 +305,10 @@ pub async fn supervise(opts: StartOptions) -> SuperviseHandle {
                     });
                     restarts = 0;
                     logfmt::info("看门狗", "正在重启子服务...");
-                    tokio::time::sleep(Duration::from_millis(300)).await;
+                    tokio::select! {
+                        _ = tokio::time::sleep(Duration::from_millis(300)) => {},
+                        _ = stop_rx.recv() => break,
+                    }
                 }
             }
         }
@@ -308,17 +328,20 @@ pub async fn run_server(
     stop_rx: &mut mpsc::UnboundedReceiver<()>,
     stop_tx: mpsc::UnboundedSender<()>,
 ) -> Result<(), RunError> {
+    let shutdown = shutdown_signal();
+    tokio::pin!(shutdown);
     let root = &opts.src_root;
     let data_dir = &opts.data_dir;
 
     // Xvfb/VNC 按需拉起；Xvfb 退出轮会清环境变量，回到这里重新启动
-    helpers
-        .ensure(opts, helper_tx)
-        .await
-        .map_err(RunError::Fatal)?;
+    tokio::select! {
+        biased;
+        _ = &mut shutdown => return Ok(()),
+        result = helpers.ensure(opts, helper_tx) => result.map_err(RunError::Fatal)?,
+    }
     let vnc_info = helpers.vnc_info.clone();
 
-    let config = config::load_config(root)
+    let config = config::load_config_in(root, data_dir)
         .map_err(|ConfigError(e)| RunError::Fatal(format!("配置加载失败: {e}")))?;
     let port = config::port_of(&config);
 
@@ -343,7 +366,11 @@ pub async fn run_server(
     }
 
     // 启动引擎桥
-    let sock = std::env::temp_dir().join(format!("webai2api-bridge-{}.sock", std::process::id()));
+    let temp_dir = data_dir.join("temp");
+    std::fs::create_dir_all(&temp_dir).ok();
+    // Unix socket path lengths are limited (about 104 bytes on macOS). Keep the
+    // IPC name short; browser output and bridge scratch files still use data_dir.
+    let sock = std::env::temp_dir().join(format!("w2a-{}.sock", std::process::id()));
     let bridge_script = opts
         .bridge_script
         .clone()
@@ -353,22 +380,41 @@ pub async fn run_server(
         .login
         .as_deref()
         .map(|s| if s.is_empty() { "1" } else { s });
-    let temp_dir = data_dir.join("temp");
-    let (mut child, bridge_client) = bridge::spawn_bridge(
-        &node,
-        &bridge_script,
-        root,
-        &sock,
-        login,
-        &temp_dir,
-        &opts.extra_envs,
-    )
-    .await
-    .map_err(|e| RunError::Retryable(e.to_string()))?;
+    let spawned = tokio::select! {
+        biased;
+        _ = &mut shutdown => return Ok(()),
+        result = bridge::spawn_bridge(
+            &node,
+            &bridge_script,
+            root,
+            &sock,
+            login,
+            &temp_dir,
+            &opts.extra_envs,
+        ) => result,
+    };
+    let (mut child, bridge_client) = spawned.map_err(|e| RunError::Retryable(e.to_string()))?;
     let bridge_pid = child.id().unwrap_or(0);
 
+    tokio::select! {
+        biased;
+        _ = &mut shutdown => {
+            shutdown_bridge(&bridge_client, bridge_pid, &mut child).await;
+            return Ok(());
+        }
+        _ = std::future::ready(()) => {}
+    }
+
     // 启动预检（对齐 server.js 的 runPreflight）：依赖损坏/内核缺失时致命退出
-    if let Err(e) = bridge_client.preflight().await {
+    let preflight = tokio::select! {
+        result = bridge_client.preflight() => Some(result),
+        _ = &mut shutdown => None,
+    };
+    let Some(preflight) = preflight else {
+        shutdown_bridge(&bridge_client, bridge_pid, &mut child).await;
+        return Ok(());
+    };
+    if let Err(e) = preflight {
         logfmt::error("服务器", &format!("启动预检失败: {e}"));
         kill_tree(bridge_pid);
         let _ = child.wait().await;
@@ -379,7 +425,15 @@ pub async fn run_server(
     let mut safe_mode: Option<String> = None;
     let mut worker_snapshot = json!({"workers": []});
     let mut browser_stopped = false;
-    match bridge_client.init(&config).await {
+    let init = tokio::select! {
+        result = bridge_client.init(&config) => Some(result),
+        _ = &mut shutdown => None,
+    };
+    let Some(init) = init else {
+        shutdown_bridge(&bridge_client, bridge_pid, &mut child).await;
+        return Ok(());
+    };
+    match init {
         Ok(v) => {
             worker_snapshot = v.get("workers").cloned().unwrap_or(json!([]));
             browser_stopped = v
@@ -409,7 +463,7 @@ pub async fn run_server(
         config: config.clone(),
         bridge: bridge_client.clone(),
         queue,
-        webui_dir: install_dir().join("webui-dist"),
+        webui_dir: webui_dir(),
         data_dir: data_dir.to_path_buf(),
         temp_dir,
         started_at: std::time::Instant::now(),
@@ -422,8 +476,8 @@ pub async fn run_server(
         vnc: Mutex::new(vnc_info),
         workers: Mutex::new(json!({ "workers": worker_snapshot })),
         browser_stopped: Mutex::new(browser_stopped),
-        config_path: config::resolve_config_path(root)
-            .unwrap_or_else(|_| root.join("data/config.yaml")),
+        config_path: config::resolve_config_path_in(root, data_dir)
+            .unwrap_or_else(|_| data_dir.join("config.yaml")),
         src_root: root.to_path_buf(),
         stop: stop_tx,
         config_save: Mutex::new(()),
@@ -479,6 +533,8 @@ pub async fn run_server(
             }
             status = child.wait() => {
                 let code = status.map(|s| s.code().unwrap_or(1)).unwrap_or(1);
+                // The bridge can exit while browser grandchildren remain alive.
+                kill_tree(bridge_pid);
                 break Err(RunError::Retryable(format!("引擎桥退出 (code: {code})")));
             }
             _ = stop_rx.recv() => {
@@ -486,7 +542,7 @@ pub async fn run_server(
                 shutdown_bridge(&bridge_client, bridge_pid, &mut child).await;
                 break Ok(());
             }
-            _ = shutdown_signal() => {
+            _ = &mut shutdown => {
                 logfmt::info("看门狗", "收到退出信号，开始清理");
                 shutdown_bridge(&bridge_client, bridge_pid, &mut child).await;
                 break Ok(());
@@ -572,6 +628,21 @@ fn install_dir() -> PathBuf {
     PathBuf::from(".")
 }
 
+fn webui_dir() -> PathBuf {
+    let manifest = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let candidates = [
+        std::env::var_os("WEBAI2API_WEBUI_DIR").map(PathBuf::from),
+        Some(install_dir().join("webui/dist")),
+        Some(install_dir().join("webui-dist")),
+        Some(manifest.join("../../webui/dist")),
+    ];
+    candidates
+        .into_iter()
+        .flatten()
+        .find(|path| path.join("index.html").is_file())
+        .unwrap_or_else(|| manifest.join("../../webui/dist"))
+}
+
 // ==================== Xvfb / VNC ====================
 
 /// 找到空闲显示号并调用 scripts/start-xvfb.sh，返回 (显示号, 子进程)。
@@ -628,7 +699,7 @@ async fn serve_ipc(
 ) -> std::io::Result<()> {
     let sock_path = std::env::var("SUPERVISOR_IPC")
         .map(PathBuf::from)
-        .unwrap_or_else(|_| std::env::temp_dir().join("webai2api-supervisor.sock"));
+        .unwrap_or_else(|_| state.data_dir.join("temp/webai2api-supervisor.sock"));
     if sock_path.exists() {
         std::fs::remove_file(&sock_path).ok();
     }
@@ -674,4 +745,19 @@ async fn serve_ipc(
         }
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn webui_is_resolved_from_checkout_layout() {
+        let resolved = webui_dir();
+        assert!(
+            resolved.join("index.html").is_file(),
+            "{}",
+            resolved.display()
+        );
+    }
 }

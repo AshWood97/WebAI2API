@@ -1450,6 +1450,13 @@ async fn stats_range(query: &str, clear: bool) -> Response {
 
 /// 配置写回：读现有 YAML → 按 WebUI 字段映射后写回（与原版一致，注释不保留）。
 async fn save_config(state: &AppState, path: &str, body: &[u8]) -> Response {
+    // Serialize the complete read/merge/validate/write transaction. Acquiring this
+    // before reading prevents concurrent patches from overwriting one another.
+    static CONFIG_SAVE: OnceLock<Arc<tokio::sync::Mutex<()>>> = OnceLock::new();
+    let save_lock = CONFIG_SAVE
+        .get_or_init(|| Arc::new(tokio::sync::Mutex::new(())))
+        .clone();
+    let _guard = save_lock.lock_owned().await;
     let section = path.trim_start_matches("/config/");
     let patch: Value = match serde_json::from_slice(body) {
         Ok(v) => v,
@@ -1568,7 +1575,6 @@ async fn save_config(state: &AppState, path: &str, body: &[u8]) -> Response {
         Prepared::Serialized(s) => s,
     };
     // 原子写：临时文件 + rename，崩溃不留半截配置；互斥锁防止并发保存互相覆盖。
-    let _guard = state.config_save.lock().unwrap();
     let tmp = config_tmp_path(&state.config_path);
     let cfg_path = state.config_path.clone();
     let orig = std::fs::read_to_string(&cfg_path).unwrap_or_default();
@@ -1591,7 +1597,7 @@ async fn save_config(state: &AppState, path: &str, body: &[u8]) -> Response {
         );
     }
     // 用真实 src-root 重新加载校验，确保与启动路径一致
-    if let Err(ConfigError(e)) = config::load_config(&state.src_root) {
+    if let Err(ConfigError(e)) = config::load_config_in(&state.src_root, &state.data_dir) {
         if let Err(restore) =
             std::fs::write(&tmp, &orig).and_then(|_| std::fs::rename(&tmp, &cfg_path))
         {
