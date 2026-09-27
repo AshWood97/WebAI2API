@@ -27,7 +27,7 @@ pub struct StartOptions {
     pub login: Option<String>,
     pub xvfb: bool,
     pub vnc: bool,
-    /// 覆盖引擎桥脚本（测试注入 mock 桥）；None 用安装目录的 bridge/bridge.mjs。
+    /// 覆盖引擎桥脚本（测试注入 mock 桥）；None 用安装目录的 bridge/browser-runtime.mjs。
     pub bridge_script: Option<PathBuf>,
     /// 额外传给引擎桥子进程的环境变量（作用域限定在桥进程，避免污染本进程全局环境）。
     pub extra_envs: Vec<(String, String)>,
