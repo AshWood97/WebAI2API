@@ -294,7 +294,9 @@ async fn finish_ok(task: &mut Task, gen: GenerateResult, image_markdown: bool, d
         finish_err(
             task,
             error,
-            gen.code.as_deref().unwrap_or("GENERATION_FAILED"),
+            // Node's HTTP API exposes one stable code for adapter failures;
+            // scheduler codes stay internal while retryable controls status.
+            "GENERATION_FAILED",
             gen.retryable,
             status,
             duration,

@@ -197,11 +197,11 @@ async fn endpoints_generation_and_graceful_stop() {
         Some("mock-reasoning")
     );
 
-    // 适配器错误 → 502 + 透传 code
+    // 适配器错误 → 与 Node 队列一致，HTTP 层统一 GENERATION_FAILED。
     let (status, body) = post(port, "/v1/chat/completions",
         serde_json::json!({"model": "gpt-test", "messages": [{"role": "user", "content": "失败一下"}]})).await;
     assert_eq!(status, 502, "{body}");
-    assert_eq!(body["error"]["code"], "CONTENT_BLOCKED");
+    assert_eq!(body["error"]["code"], "GENERATION_FAILED");
 
     // stateless 拒绝 conversation_id；未知模型 400
     let (status, _) = post(port, "/v1/stateless/chat/completions",
