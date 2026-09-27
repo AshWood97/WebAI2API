@@ -634,13 +634,13 @@ fn webui_dir() -> PathBuf {
         std::env::var_os("WEBAI2API_WEBUI_DIR").map(PathBuf::from),
         Some(install_dir().join("webui/dist")),
         Some(install_dir().join("webui-dist")),
-        Some(manifest.join("../../webui/dist")),
+        Some(manifest.join("../webui/dist")),
     ];
     candidates
         .into_iter()
         .flatten()
         .find(|path| path.join("index.html").is_file())
-        .unwrap_or_else(|| manifest.join("../../webui/dist"))
+        .unwrap_or_else(|| manifest.join("../webui/dist"))
 }
 
 // ==================== Xvfb / VNC ====================

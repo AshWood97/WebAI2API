@@ -20,7 +20,7 @@ struct Inner {
     writer: mpsc::UnboundedSender<String>,
     pending: Mutex<HashMap<u64, ReplyTx>>,
     next_id: AtomicU64,
-    events: tokio::sync::Mutex<mpsc::UnboundedReceiver<Value>>,
+    events: tokio::sync::Mutex<mpsc::Receiver<Value>>,
 }
 
 /// Cloneable connection to `bridge/browser-runtime.mjs`.
@@ -47,7 +47,9 @@ impl BrowserRpc {
                 }
             }
         });
-        let (event_tx, event_rx) = mpsc::unbounded_channel();
+        // Event consumers may use event.poll instead of this live channel.
+        // Bound the channel so an idle receiver cannot grow memory forever.
+        let (event_tx, event_rx) = mpsc::channel(1024);
         let inner = Arc::new(Inner {
             writer,
             pending: Mutex::new(HashMap::new()),
@@ -72,7 +74,7 @@ impl BrowserRpc {
                         let _ = tx.send(result);
                     }
                 } else {
-                    let _ = event_tx.send(message);
+                    let _ = event_tx.try_send(message);
                 }
             }
             for (_, tx) in read_inner.pending.lock().unwrap().drain() {
@@ -264,6 +266,19 @@ impl BrowserRpc {
             "response.body",
             json!({"responseId": response_id, "path": path}),
             std::time::Duration::from_secs(120),
+        )
+        .await
+    }
+
+    pub async fn response_wait_finished(
+        &self,
+        response_id: &str,
+        timeout_ms: u64,
+    ) -> Result<OkResult, BridgeError> {
+        self.call(
+            "response.waitFinished",
+            json!({"responseId": response_id, "timeoutMs": timeout_ms}),
+            std::time::Duration::from_millis(timeout_ms.saturating_add(1_000)),
         )
         .await
     }

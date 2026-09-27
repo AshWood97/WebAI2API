@@ -100,8 +100,8 @@ pub fn models_for_adapter(adapter_id: &str, config: &Value) -> Value {
 }
 
 /// Aggregate models in adapter order, retaining the first occurrence of each ID.
-/// Each adapter contributes unqualified IDs and then `{adapter}/{model}` IDs,
-/// matching `Worker.getModels()`; the pool de-duplicates IDs across workers.
+/// `Worker.getModels()` emits all unqualified IDs first, then all qualified IDs.
+/// The pool de-duplicates IDs across workers.
 pub fn aggregate_models(adapter_ids: &[String], config: &Value) -> Value {
     let mut seen = HashSet::new();
     let mut data = Vec::new();
@@ -132,9 +132,25 @@ pub fn aggregate_models(adapter_ids: &[String], config: &Value) -> Value {
             record["owned_by"] = Value::String("internal_server".to_owned());
             data.push(record);
         }
+    }
 
-        // It then includes each model under an adapter-qualified ID.
-        for (model, model_id) in enabled {
+    for adapter_id in adapter_ids {
+        let Some(models) = adapter(adapter_id)
+            .and_then(|entry| entry.get("models"))
+            .and_then(Value::as_array)
+        else {
+            continue;
+        };
+        for model in models {
+            let Some(model_id) = model.get("id").and_then(Value::as_str) else {
+                continue;
+            };
+            if !model_enabled(config, adapter_id, model_id) {
+                continue;
+            }
+            let Some(model) = model.as_object() else {
+                continue;
+            };
             let qualified_id = format!("{adapter_id}/{model_id}");
             if !seen.insert(qualified_id.clone()) {
                 continue;

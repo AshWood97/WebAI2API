@@ -1,3 +1,4 @@
+pub mod adapters;
 pub mod bridge;
 pub mod browser_rpc;
 pub mod catalog;

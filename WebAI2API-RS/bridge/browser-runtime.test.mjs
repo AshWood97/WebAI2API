@@ -139,6 +139,20 @@ test('subscription is active before the following page action', async () => {
     await runtime.shutdown();
 });
 
+test('response finish wait is bounded and keyed by opaque response ID', async () => {
+    const { runtime } = fixture();
+    const { browserId } = await runtime.browserStart();
+    const { pageId } = await runtime.pageCreate({ browserId });
+    const page = runtime.pages.get(pageId).page;
+    page.emit('response', { url: () => 'https://site.test/ok', status: () => 200, finished: async () => null });
+    const completeId = [...runtime.responses.keys()][0];
+    assert.deepEqual(await runtime.responseWaitFinished({ responseId: completeId, timeoutMs: 10 }), { ok: true });
+    page.emit('response', { url: () => 'https://site.test/hang', status: () => 200, finished: () => new Promise(() => {}) });
+    const stalledId = [...runtime.responses.keys()][1];
+    await assert.rejects(runtime.responseWaitFinished({ responseId: stalledId, timeoutMs: 10 }), /timeout/);
+    await runtime.shutdown();
+});
+
 test('bounded event buffer reports events dropped before the requested cursor', async () => {
     const { runtime } = fixture({ eventBufferLimit: 16 });
     const { browserId } = await runtime.browserStart();

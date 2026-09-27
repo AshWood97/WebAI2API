@@ -57,6 +57,7 @@ export class BrowserRuntime {
             'event.unsubscribe': p => this.eventUnsubscribe(p),
             'event.poll': p => this.eventPoll(p),
             'response.body': p => this.responseBody(p),
+            'response.waitFinished': p => this.responseWaitFinished(p),
             'route.install': p => this.routeInstall(p),
             'route.resolve': p => this.routeResolve(p),
             'route.remove': p => this.routeRemove(p),
@@ -285,6 +286,7 @@ export class BrowserRuntime {
                 case 'last': locator = locator.last(); break;
                 case 'nth': locator = locator.nth(Number(step.index)); break;
                 case 'filter': locator = locator.filter({ hasText: step.hasText, hasNotText: step.hasNotText, visible: step.visible }); break;
+                case 'locator': locator = locator.locator(String(step.selector)); break;
                 default: throw new Error(`unsupported locator chain operation: ${step.op}`);
             }
         }
@@ -398,6 +400,24 @@ export class BrowserRuntime {
             return { path: outputPath, bytes: body.length };
         }
         return { base64: Buffer.from(body).toString('base64'), bytes: body.length };
+    }
+
+    async responseWaitFinished({ responseId, timeoutMs = 60000 } = {}) {
+        const response = this.responses.get(responseId);
+        if (!response) throw new Error('unknown or expired responseId');
+        const deadline = Math.min(300000, Math.max(1, Number(timeoutMs) || 60000));
+        let timer;
+        try {
+            const completion = typeof response.finished === 'function' ? response.finished() : response.body();
+            const result = await Promise.race([
+                completion,
+                new Promise((_, reject) => { timer = setTimeout(() => reject(new Error('response finish timeout')), deadline); })
+            ]);
+            if (result instanceof Error) throw result;
+            return { ok: true };
+        } finally {
+            clearTimeout(timer);
+        }
     }
 
     async routeInstall({ pageId, pattern = '**/*', timeoutMs } = {}) {
