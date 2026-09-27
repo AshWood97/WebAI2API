@@ -1,4 +1,6 @@
 pub mod bridge;
+pub mod browser_rpc;
+pub mod catalog;
 pub mod config;
 pub mod config_patch;
 pub mod errors;
@@ -11,6 +13,7 @@ pub mod parse;
 pub mod queue;
 pub mod respond;
 pub mod run;
+pub mod scheduler;
 pub mod server;
 pub mod stats;
 pub mod typed;

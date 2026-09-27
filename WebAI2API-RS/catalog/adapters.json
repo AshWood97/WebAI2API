@@ -1,0 +1,1964 @@
+[
+  {
+    "file": "chatgpt.js",
+    "id": "chatgpt",
+    "displayName": "ChatGPT (图片生成)",
+    "description": "使用 ChatGPT 官网生成图片，支持参考图片上传。需要已登录的 ChatGPT 账户，请使用会员账号 (包含 K12 教师认证)，非会员账号会有速率限制。",
+    "models": [
+      {
+        "id": "gpt-image-1.5",
+        "imagePolicy": "optional"
+      }
+    ],
+    "navigationHandlers": []
+  },
+  {
+    "file": "chatgpt_text.js",
+    "id": "chatgpt_text",
+    "displayName": "ChatGPT (文本生成)",
+    "description": "使用 ChatGPT 官网生成文本，支持多模型切换和图片上传。需要已登录的 ChatGPT 账户，若需要选择模型，请使用会员账号 (包含 K12 教室认证账号)。",
+    "configSchema": [
+      {
+        "key": "temporaryChat",
+        "label": "临时对话",
+        "type": "boolean",
+        "default": false,
+        "note": "开启后将使用临时对话模式 (?temporary-chat=true)"
+      }
+    ],
+    "models": [
+      {
+        "id": "gpt-instant",
+        "codeName": "Instant",
+        "imagePolicy": "optional",
+        "type": "text"
+      },
+      {
+        "id": "gpt-thinking",
+        "codeName": "Thinking",
+        "imagePolicy": "optional",
+        "type": "text"
+      },
+      {
+        "id": "gpt-pro",
+        "codeName": "Pro",
+        "imagePolicy": "optional",
+        "type": "text"
+      }
+    ],
+    "navigationHandlers": []
+  },
+  {
+    "file": "claude_text.js",
+    "id": "claude_text",
+    "displayName": "Claude.ai (文本生成)",
+    "description": "使用 Claude.ai 官网生成文本。需要在浏览器中登录 Claude 账号。",
+    "configSchema": [],
+    "models": [
+      {
+        "id": "claude-sonnet-5",
+        "codeName": "Sonnet",
+        "imagePolicy": "forbidden",
+        "type": "text"
+      },
+      {
+        "id": "claude-auto",
+        "codeName": "",
+        "imagePolicy": "forbidden",
+        "type": "text"
+      }
+    ],
+    "navigationHandlers": []
+  },
+  {
+    "file": "deepseek_text.js",
+    "id": "deepseek_text",
+    "displayName": "DeepSeek (文本生成)",
+    "description": "使用 DeepSeek 官网生成文本，支持 DeepThink 深度思考和 Search 搜索模式。需要已登录的 DeepSeek 账户。",
+    "models": [
+      {
+        "id": "deepseek",
+        "imagePolicy": "forbidden"
+      },
+      {
+        "id": "deepseek-thinking",
+        "imagePolicy": "forbidden",
+        "thinking": true
+      },
+      {
+        "id": "deepseek-search",
+        "imagePolicy": "forbidden",
+        "search": true
+      },
+      {
+        "id": "deepseek-thinking-search",
+        "imagePolicy": "forbidden",
+        "thinking": true,
+        "search": true
+      },
+      {
+        "id": "deepseek-expert",
+        "imagePolicy": "forbidden"
+      },
+      {
+        "id": "deepseek-thinking-expert",
+        "imagePolicy": "forbidden",
+        "thinking": true
+      },
+      {
+        "id": "deepseek-search-expert",
+        "imagePolicy": "forbidden",
+        "search": true
+      },
+      {
+        "id": "deepseek-thinking-search-expert",
+        "imagePolicy": "forbidden",
+        "thinking": true,
+        "search": true
+      }
+    ],
+    "navigationHandlers": []
+  },
+  {
+    "file": "doubao.js",
+    "id": "doubao",
+    "displayName": "豆包 (图片生成)",
+    "description": "使用字节跳动豆包生成图片，支持多种模型和参考图片上传。需要已登录的豆包账户。",
+    "models": [
+      {
+        "id": "seedream-4.5",
+        "codeName": "Seedream 4.5",
+        "imagePolicy": "optional"
+      },
+      {
+        "id": "seedream-4.0",
+        "codeName": "Seedream 4.0",
+        "imagePolicy": "optional"
+      },
+      {
+        "id": "seedream-5.0-lite",
+        "codeName": "Seedream 5.0 Lite",
+        "imagePolicy": "optional"
+      }
+    ],
+    "navigationHandlers": []
+  },
+  {
+    "file": "doubao_text.js",
+    "id": "doubao_text",
+    "displayName": "豆包 (文本生成)",
+    "description": "使用字节跳动豆包生成文本，支持深度思考模式和图片上传。需要已登录的豆包账户。",
+    "models": [
+      {
+        "id": "seed",
+        "imagePolicy": "optional",
+        "type": "text"
+      },
+      {
+        "id": "seed-thinking",
+        "imagePolicy": "optional",
+        "type": "text"
+      },
+      {
+        "id": "seed-pro",
+        "imagePolicy": "optional",
+        "type": "text"
+      }
+    ],
+    "navigationHandlers": []
+  },
+  {
+    "file": "gemini.js",
+    "id": "gemini",
+    "displayName": "Google Gemini (图片、视频生成)",
+    "description": "使用 Google Gemini 官网生成图片和视频，支持参考图片上传。需要已登录的 Google 账户，免费账户图片生成有速率限制，视频生成必须为会员账户才可使用。",
+    "configSchema": [
+      {
+        "key": "temporaryChat",
+        "label": "临时对话",
+        "type": "boolean",
+        "default": false,
+        "note": "开启后将使用临时对话模式"
+      }
+    ],
+    "models": [
+      {
+        "id": "gemini-3-pro-image-preview",
+        "imagePolicy": "optional"
+      },
+      {
+        "id": "veo-3.1-generate-preview",
+        "imagePolicy": "optional"
+      }
+    ],
+    "navigationHandlers": []
+  },
+  {
+    "file": "gemini_biz.js",
+    "id": "gemini_biz",
+    "displayName": "Gemini Business (图片、视频生成)",
+    "description": "使用 Gemini Business 企业版生成图片和视频。需要提供入口 URL 并已登录企业账户 (每个谷歌账户首次可以在官网点击免费试用获取30天使用资格)。",
+    "configSchema": [
+      {
+        "key": "entryUrl",
+        "label": "入口 URL",
+        "type": "string",
+        "required": true,
+        "placeholder": "https://business.gemini.google/home/cid/8888a888-b6e0-88be-86e1-888cf3ee8cf4"
+      }
+    ],
+    "models": [
+      {
+        "id": "gemini-3-pro-image-preview",
+        "imagePolicy": "optional"
+      },
+      {
+        "id": "veo-3.1-generate-preview",
+        "imagePolicy": "optional"
+      }
+    ],
+    "navigationHandlers": [
+      null
+    ]
+  },
+  {
+    "file": "gemini_biz_text.js",
+    "id": "gemini_biz_text",
+    "displayName": "Gemini Business (文本生成)",
+    "description": "使用 Gemini Business 企业版生成文本，支持 Grounding 搜索模式。需要提供入口 URL 并已登录企业账户 (每个谷歌账户首次可以在官网点击免费试用获取30天使用资格)，与 gemini_biz 共享配置。",
+    "configSchema": [
+      {
+        "key": "entryUrl",
+        "label": "入口 URL",
+        "type": "string",
+        "required": true,
+        "placeholder": "https://business.gemini.google/home/cid/8888a888-b6e0-88be-86e1-888cf3ee8cf4",
+        "note": "与 gemini_biz 共享配置"
+      }
+    ],
+    "models": [
+      {
+        "id": "gemini-3-pro",
+        "codeName": "gemini-3-pro-preview",
+        "imagePolicy": "optional",
+        "type": "text"
+      },
+      {
+        "id": "gemini-2.5-pro",
+        "codeName": "gemini-2.5pro",
+        "imagePolicy": "optional",
+        "type": "text"
+      },
+      {
+        "id": "gemini-3-flash",
+        "codeName": "gemini-3-pro-preview",
+        "imagePolicy": "optional",
+        "type": "text"
+      },
+      {
+        "id": "gemini-2.5-flash",
+        "codeName": "gemini-2.5-flash",
+        "imagePolicy": "optional",
+        "type": "text"
+      },
+      {
+        "id": "gemini-3-pro-grounding",
+        "codeName": "gemini-3-pro-preview",
+        "imagePolicy": "optional",
+        "type": "text"
+      },
+      {
+        "id": "gemini-2.5-pro-grounding",
+        "codeName": "gemini-2.5-pro",
+        "imagePolicy": "optional",
+        "type": "text"
+      },
+      {
+        "id": "gemini-2.5-flash-grounding",
+        "codeName": "gemini-2.5-flash",
+        "imagePolicy": "optional",
+        "type": "text"
+      },
+      {
+        "id": "gemini-3-flash-grounding",
+        "codeName": "gemini-3-flash-preview",
+        "imagePolicy": "optional",
+        "type": "text"
+      }
+    ],
+    "navigationHandlers": [
+      null
+    ]
+  },
+  {
+    "file": "gemini_text.js",
+    "id": "gemini_text",
+    "displayName": "Google Gemini (文本生成)",
+    "description": "使用 Google Gemini 官网生成文本，支持多模型切换和图片上传。需要已登录的 Google 账户。",
+    "configSchema": [
+      {
+        "key": "temporaryChat",
+        "label": "临时对话",
+        "type": "boolean",
+        "default": false,
+        "note": "开启后将使用临时对话模式"
+      }
+    ],
+    "models": [
+      {
+        "id": "gemini-3.1-flash",
+        "imagePolicy": "optional",
+        "type": "text"
+      },
+      {
+        "id": "gemini-3.1-flash-thinking",
+        "imagePolicy": "optional",
+        "type": "text"
+      },
+      {
+        "id": "gemini-3.1-pro",
+        "imagePolicy": "optional",
+        "type": "text"
+      }
+    ],
+    "navigationHandlers": []
+  },
+  {
+    "file": "google_flow.js",
+    "id": "google_flow",
+    "displayName": "Google Flow (图片生成)",
+    "description": "使用 Google Labs Flow 工具生成图片，支持多张参考图片上传和横竖版选择。需要已登录的 Google 账户。",
+    "models": [
+      {
+        "id": "gemini-3-pro-image-preview",
+        "codeName": "🍌 Nano Banana Pro",
+        "imageSize": "0",
+        "imagePolicy": "optional"
+      },
+      {
+        "id": "gemini-2.5-flash-image-preview",
+        "codeName": "🍌 Nano Banana",
+        "imageSize": "0",
+        "imagePolicy": "optional"
+      },
+      {
+        "id": "imagen-4",
+        "codeName": "Imagen 4",
+        "imageSize": "0",
+        "imagePolicy": "optional"
+      },
+      {
+        "id": "gemini-3-pro-image-preview-landspace",
+        "codeName": "🍌 Nano Banana Pro",
+        "imageSize": "16:9",
+        "imagePolicy": "optional"
+      },
+      {
+        "id": "gemini-3-pro-image-preview-portrait",
+        "codeName": "🍌 Nano Banana Pro",
+        "imageSize": "9:16",
+        "imagePolicy": "optional"
+      },
+      {
+        "id": "gemini-2.5-flash-image-preview-landspace",
+        "codeName": "🍌 Nano Banana",
+        "imageSize": "16:9",
+        "imagePolicy": "optional"
+      },
+      {
+        "id": "gemini-2.5-flash-image-preview-portrait",
+        "codeName": "🍌 Nano Banana",
+        "imageSize": "9:16",
+        "imagePolicy": "optional"
+      },
+      {
+        "id": "imagen-4-landspace",
+        "codeName": "Imagen 4",
+        "imageSize": "16:9",
+        "imagePolicy": "optional"
+      },
+      {
+        "id": "imagen-4-portrait",
+        "codeName": "Imagen 4",
+        "imageSize": "9:16",
+        "imagePolicy": "optional"
+      }
+    ],
+    "navigationHandlers": []
+  },
+  {
+    "file": "lmarena.js",
+    "id": "lmarena",
+    "displayName": "LMArena (图片生成)",
+    "description": "使用 LMArena 平台生成图片，支持多种图片生成模型。需要已登录的 LMArena 账户，若不登录会频繁弹出人机验证码且有速率限制。",
+    "configSchema": [
+      {
+        "key": "returnUrl",
+        "label": "返回图片 URL",
+        "type": "boolean",
+        "default": false,
+        "note": "开启后直接返回图片 URL (但其他不支持该选项的适配器仍然会返回 Base64)"
+      }
+    ],
+    "models": [
+      {
+        "id": "gemini-3.1-flash-image-preview",
+        "codeName": "gemini-3.1-flash-image-preview (nano-banana-2) [web-search]",
+        "imagePolicy": "optional"
+      },
+      {
+        "id": "gpt-image-1.5-high-fidelity",
+        "imagePolicy": "optional"
+      },
+      {
+        "id": "gemini-3-pro-image-preview-2k",
+        "codeName": "gemini-3-pro-image-preview-2k (nano-banana-pro)",
+        "imagePolicy": "optional"
+      },
+      {
+        "id": "mai-image-2",
+        "imagePolicy": "forbidden"
+      },
+      {
+        "id": "reve-v1.5",
+        "imagePolicy": "required"
+      },
+      {
+        "id": "flux-2-max",
+        "imagePolicy": "optional"
+      },
+      {
+        "id": "flux-2-flex",
+        "imagePolicy": "optional"
+      },
+      {
+        "id": "flux-2-pro",
+        "imagePolicy": "optional"
+      },
+      {
+        "id": "hunyuan-image-3.0",
+        "imagePolicy": "forbidden"
+      },
+      {
+        "id": "flux-2-dev",
+        "imagePolicy": "optional"
+      },
+      {
+        "id": "seedream-4.5",
+        "imagePolicy": "optional"
+      },
+      {
+        "id": "qwen-image-2512",
+        "imagePolicy": "forbidden"
+      },
+      {
+        "id": "imagen-4.0-generate-001",
+        "imagePolicy": "forbidden"
+      },
+      {
+        "id": "wan2.5-t2i-preview",
+        "imagePolicy": "forbidden"
+      },
+      {
+        "id": "gpt-image-1",
+        "imagePolicy": "optional"
+      },
+      {
+        "id": "seedream-5.0-lite",
+        "imagePolicy": "optional"
+      },
+      {
+        "id": "seedream-4-high-res-fal",
+        "imagePolicy": "optional"
+      },
+      {
+        "id": "gpt-image-1-mini",
+        "imagePolicy": "optional"
+      },
+      {
+        "id": "recraft-v4",
+        "imagePolicy": "forbidden"
+      },
+      {
+        "id": "seedream-3",
+        "imagePolicy": "forbidden"
+      },
+      {
+        "id": "flux-2-klein-9b",
+        "imagePolicy": "optional"
+      },
+      {
+        "id": "qwen-image-prompt-extend",
+        "imagePolicy": "forbidden"
+      },
+      {
+        "id": "flux-1-kontext-pro",
+        "imagePolicy": "optional"
+      },
+      {
+        "id": "imagen-3.0-generate-002",
+        "imagePolicy": "forbidden"
+      },
+      {
+        "id": "ideogram-v3-quality",
+        "imagePolicy": "forbidden"
+      },
+      {
+        "id": "photon",
+        "imagePolicy": "forbidden"
+      },
+      {
+        "id": "p-image",
+        "imagePolicy": "forbidden"
+      },
+      {
+        "id": "flux-2-klein-4b",
+        "imagePolicy": "optional"
+      },
+      {
+        "id": "recraft-v3",
+        "imagePolicy": "forbidden"
+      },
+      {
+        "id": "runway-gen4",
+        "imagePolicy": "forbidden"
+      },
+      {
+        "id": "lucid-origin",
+        "imagePolicy": "forbidden"
+      },
+      {
+        "id": "dall-e-3",
+        "imagePolicy": "forbidden"
+      },
+      {
+        "id": "flux-1-kontext-dev",
+        "imagePolicy": "optional"
+      },
+      {
+        "id": "imagen-4.0-ultra-generate-001",
+        "imagePolicy": "forbidden"
+      },
+      {
+        "id": "p-image-edit",
+        "imagePolicy": "required"
+      },
+      {
+        "id": "hunyuan-image-2.1",
+        "imagePolicy": "forbidden"
+      },
+      {
+        "id": "reve-v1.1",
+        "imagePolicy": "required"
+      },
+      {
+        "id": "vidu-q2-image",
+        "imagePolicy": "optional"
+      },
+      {
+        "id": "imagen-4.0-fast-generate-001",
+        "imagePolicy": "forbidden"
+      },
+      {
+        "id": "qwen-image-2.0",
+        "imagePolicy": "forbidden"
+      },
+      {
+        "id": "qwen-image-2.0-pro",
+        "imagePolicy": "forbidden"
+      },
+      {
+        "id": "reve-v1.1-fast",
+        "imagePolicy": "required"
+      },
+      {
+        "id": "kling-image-o1",
+        "imagePolicy": "forbidden"
+      },
+      {
+        "id": "chatgpt-image-latest-high-fidelity",
+        "codeName": "chatgpt-image-latest-high-fidelity (20251216)",
+        "imagePolicy": "required"
+      },
+      {
+        "id": "hunyuan-image-3.0-instruct",
+        "imagePolicy": "required"
+      },
+      {
+        "id": "wan2.7-image",
+        "imagePolicy": "required"
+      },
+      {
+        "id": "grok-imagine-image-pro",
+        "imagePolicy": "forbidden"
+      },
+      {
+        "id": "grok-imagine-image",
+        "imagePolicy": "forbidden"
+      },
+      {
+        "id": "wan2.7-image-pro",
+        "imagePolicy": "required"
+      },
+      {
+        "id": "qwen-image-edit-2511",
+        "imagePolicy": "required"
+      },
+      {
+        "id": "gemini-2.5-flash-image-preview",
+        "codeName": "gemini-2.5-flash-image-preview (nano-banana)",
+        "imagePolicy": "optional"
+      },
+      {
+        "id": "wan2.5-i2i-preview",
+        "imagePolicy": "required"
+      },
+      {
+        "id": "qwen-image-edit",
+        "imagePolicy": "required"
+      },
+      {
+        "id": "wan2.6-image",
+        "imagePolicy": "required"
+      },
+      {
+        "id": "seededit-3.0",
+        "imagePolicy": "required"
+      },
+      {
+        "id": "wan2.6-t2i",
+        "imagePolicy": "forbidden"
+      }
+    ],
+    "navigationHandlers": []
+  },
+  {
+    "file": "lmarena_text.js",
+    "id": "lmarena_text",
+    "displayName": "LMArena (文本生成)",
+    "description": "使用 LMArena 平台生成文本，支持多种大语言模型和搜索模式。需要已登录的 LMArena 账户，若不登录会频繁弹出人机验证码且有速率限制。",
+    "models": [
+      {
+        "id": "claude-sonnet-4-5-20250929",
+        "imagePolicy": "forbidden",
+        "type": "text"
+      },
+      {
+        "id": "gemini-2.5-pro",
+        "imagePolicy": "optional",
+        "type": "text"
+      },
+      {
+        "id": "claude-haiku-4-5-20251001",
+        "imagePolicy": "forbidden",
+        "type": "text"
+      },
+      {
+        "id": "gemini-3-flash",
+        "imagePolicy": "optional",
+        "type": "text"
+      },
+      {
+        "id": "gpt-5.2-high",
+        "imagePolicy": "optional",
+        "type": "text"
+      },
+      {
+        "id": "gpt-5.1",
+        "imagePolicy": "optional",
+        "type": "text"
+      },
+      {
+        "id": "gpt-5.2",
+        "imagePolicy": "optional",
+        "type": "text"
+      },
+      {
+        "id": "grok-4.20-beta-0309-reasoning",
+        "imagePolicy": "optional",
+        "type": "text"
+      },
+      {
+        "id": "gpt-5.2-chat-latest",
+        "imagePolicy": "optional",
+        "type": "text"
+      },
+      {
+        "id": "grok-4.20-multi-agent-beta-0309",
+        "imagePolicy": "optional",
+        "type": "text"
+      },
+      {
+        "id": "grok-4.1-thinking",
+        "imagePolicy": "forbidden",
+        "type": "text"
+      },
+      {
+        "id": "qwen3.5-max-preview",
+        "imagePolicy": "forbidden",
+        "type": "text"
+      },
+      {
+        "id": "claude-sonnet-4-6",
+        "imagePolicy": "optional",
+        "type": "text"
+      },
+      {
+        "id": "grok-4.1",
+        "imagePolicy": "forbidden",
+        "type": "text"
+      },
+      {
+        "id": "gpt-5.4-mini-high",
+        "imagePolicy": "optional",
+        "type": "text"
+      },
+      {
+        "id": "gpt-5.3-chat-latest",
+        "imagePolicy": "forbidden",
+        "type": "text"
+      },
+      {
+        "id": "glm-5",
+        "imagePolicy": "forbidden",
+        "type": "text"
+      },
+      {
+        "id": "gpt-5.1-high",
+        "imagePolicy": "optional",
+        "type": "text"
+      },
+      {
+        "id": "claude-sonnet-4-5-20250929-thinking-32k",
+        "imagePolicy": "forbidden",
+        "type": "text"
+      },
+      {
+        "id": "ernie-5.0-0110",
+        "imagePolicy": "forbidden",
+        "type": "text"
+      },
+      {
+        "id": "mimo-v2-pro",
+        "imagePolicy": "forbidden",
+        "type": "text"
+      },
+      {
+        "id": "longcat-flash-chat-2602-exp",
+        "imagePolicy": "forbidden",
+        "type": "text"
+      },
+      {
+        "id": "glm-4.7",
+        "imagePolicy": "forbidden",
+        "type": "text"
+      },
+      {
+        "id": "gemini-3.1-flash-lite-preview",
+        "imagePolicy": "optional",
+        "type": "text"
+      },
+      {
+        "id": "qwen3-max-preview",
+        "imagePolicy": "forbidden",
+        "type": "text"
+      },
+      {
+        "id": "gpt-5-high",
+        "imagePolicy": "optional",
+        "type": "text"
+      },
+      {
+        "id": "kimi-k2.5-instant",
+        "imagePolicy": "optional",
+        "type": "text"
+      },
+      {
+        "id": "o3-2025-04-16",
+        "imagePolicy": "optional",
+        "type": "text"
+      },
+      {
+        "id": "grok-4-1-fast-reasoning",
+        "imagePolicy": "optional",
+        "type": "text"
+      },
+      {
+        "id": "kimi-k2-thinking-turbo",
+        "imagePolicy": "forbidden",
+        "type": "text"
+      },
+      {
+        "id": "gpt-5-chat",
+        "imagePolicy": "optional",
+        "type": "text"
+      },
+      {
+        "id": "qwen3-max-2025-09-23",
+        "imagePolicy": "forbidden",
+        "type": "text"
+      },
+      {
+        "id": "deepseek-v3.2",
+        "imagePolicy": "forbidden",
+        "type": "text"
+      },
+      {
+        "id": "qwen3-235b-a22b-instruct-2507",
+        "imagePolicy": "forbidden",
+        "type": "text"
+      },
+      {
+        "id": "deepseek-v3.2-thinking",
+        "imagePolicy": "forbidden",
+        "type": "text"
+      },
+      {
+        "id": "grok-4-fast-chat",
+        "imagePolicy": "forbidden",
+        "type": "text"
+      },
+      {
+        "id": "kimi-k2-0905-preview",
+        "imagePolicy": "forbidden",
+        "type": "text"
+      },
+      {
+        "id": "qwen3.5-122b-a10b",
+        "imagePolicy": "forbidden",
+        "type": "text"
+      },
+      {
+        "id": "kimi-k2-0711-preview",
+        "imagePolicy": "forbidden",
+        "type": "text"
+      },
+      {
+        "id": "qwen3-vl-235b-a22b-instruct",
+        "imagePolicy": "optional",
+        "type": "text"
+      },
+      {
+        "id": "mistral-large-3",
+        "imagePolicy": "forbidden",
+        "type": "text"
+      },
+      {
+        "id": "gpt-4.1-2025-04-14",
+        "imagePolicy": "optional",
+        "type": "text"
+      },
+      {
+        "id": "gemini-2.5-flash",
+        "imagePolicy": "optional",
+        "type": "text"
+      },
+      {
+        "id": "mistral-medium-2508",
+        "imagePolicy": "optional",
+        "type": "text"
+      },
+      {
+        "id": "grok-4-0709",
+        "imagePolicy": "optional",
+        "type": "text"
+      },
+      {
+        "id": "grok-4-fast-reasoning",
+        "imagePolicy": "forbidden",
+        "type": "text"
+      },
+      {
+        "id": "minimax-m2.5",
+        "imagePolicy": "forbidden",
+        "type": "text"
+      },
+      {
+        "id": "qwen3.5-27b",
+        "imagePolicy": "forbidden",
+        "type": "text"
+      },
+      {
+        "id": "minimax-m2.7",
+        "imagePolicy": "forbidden",
+        "type": "text"
+      },
+      {
+        "id": "gpt-5.4-nano-high",
+        "imagePolicy": "optional",
+        "type": "text"
+      },
+      {
+        "id": "qwen3-235b-a22b-no-thinking",
+        "imagePolicy": "forbidden",
+        "type": "text"
+      },
+      {
+        "id": "qwen3-next-80b-a3b-instruct",
+        "imagePolicy": "forbidden",
+        "type": "text"
+      },
+      {
+        "id": "longcat-flash-chat",
+        "imagePolicy": "forbidden",
+        "type": "text"
+      },
+      {
+        "id": "qwen3.5-flash",
+        "imagePolicy": "forbidden",
+        "type": "text"
+      },
+      {
+        "id": "qwen3-235b-a22b-thinking-2507",
+        "imagePolicy": "forbidden",
+        "type": "text"
+      },
+      {
+        "id": "claude-sonnet-4-20250514-thinking-32k",
+        "imagePolicy": "forbidden",
+        "type": "text"
+      },
+      {
+        "id": "hunyuan-vision-1.5-thinking",
+        "imagePolicy": "optional",
+        "type": "text"
+      },
+      {
+        "id": "qwen3.5-35b-a3b",
+        "imagePolicy": "forbidden",
+        "type": "text"
+      },
+      {
+        "id": "qwen3-vl-235b-a22b-thinking",
+        "imagePolicy": "optional",
+        "type": "text"
+      },
+      {
+        "id": "mimo-v2-flash",
+        "imagePolicy": "forbidden",
+        "type": "text"
+      },
+      {
+        "id": "mimo-v2-flash-thinking",
+        "codeName": "mimo-v2-flash (thinking)",
+        "imagePolicy": "forbidden",
+        "type": "text"
+      },
+      {
+        "id": "step-3.5-flash",
+        "imagePolicy": "forbidden",
+        "type": "text"
+      },
+      {
+        "id": "o4-mini-2025-04-16",
+        "imagePolicy": "optional",
+        "type": "text"
+      },
+      {
+        "id": "gpt-5-mini-high",
+        "imagePolicy": "optional",
+        "type": "text"
+      },
+      {
+        "id": "claude-sonnet-4-20250514",
+        "imagePolicy": "forbidden",
+        "type": "text"
+      },
+      {
+        "id": "qwen3-coder-480b-a35b-instruct",
+        "imagePolicy": "forbidden",
+        "type": "text"
+      },
+      {
+        "id": "hunyuan-t1-20250711",
+        "imagePolicy": "forbidden",
+        "type": "text"
+      },
+      {
+        "id": "claude-3-7-sonnet-20250219-thinking-32k",
+        "imagePolicy": "forbidden",
+        "type": "text"
+      },
+      {
+        "id": "mistral-medium-2505",
+        "imagePolicy": "optional",
+        "type": "text"
+      },
+      {
+        "id": "minimax-m2.1-preview",
+        "imagePolicy": "forbidden",
+        "type": "text"
+      },
+      {
+        "id": "qwen3-30b-a3b-instruct-2507",
+        "imagePolicy": "forbidden",
+        "type": "text"
+      },
+      {
+        "id": "gpt-4.1-mini-2025-04-14",
+        "imagePolicy": "optional",
+        "type": "text"
+      },
+      {
+        "id": "trinity-large",
+        "imagePolicy": "forbidden",
+        "type": "text"
+      },
+      {
+        "id": "qwen3-235b-a22b",
+        "imagePolicy": "forbidden",
+        "type": "text"
+      },
+      {
+        "id": "claude-3-5-sonnet-20241022",
+        "imagePolicy": "forbidden",
+        "type": "text"
+      },
+      {
+        "id": "claude-3-7-sonnet-20250219",
+        "imagePolicy": "forbidden",
+        "type": "text"
+      },
+      {
+        "id": "qwen3-next-80b-a3b-thinking",
+        "imagePolicy": "forbidden",
+        "type": "text"
+      },
+      {
+        "id": "gemma-3-27b-it",
+        "imagePolicy": "optional",
+        "type": "text"
+      },
+      {
+        "id": "minimax-m1",
+        "imagePolicy": "forbidden",
+        "type": "text"
+      },
+      {
+        "id": "grok-3-mini-high",
+        "imagePolicy": "forbidden",
+        "type": "text"
+      },
+      {
+        "id": "gemini-2.0-flash-001",
+        "imagePolicy": "optional",
+        "type": "text"
+      },
+      {
+        "id": "grok-3-mini-beta",
+        "imagePolicy": "forbidden",
+        "type": "text"
+      },
+      {
+        "id": "mistral-small-2506",
+        "imagePolicy": "optional",
+        "type": "text"
+      },
+      {
+        "id": "intellect-3",
+        "imagePolicy": "forbidden",
+        "type": "text"
+      },
+      {
+        "id": "gpt-oss-120b",
+        "imagePolicy": "forbidden",
+        "type": "text"
+      },
+      {
+        "id": "step-3",
+        "imagePolicy": "optional",
+        "type": "text"
+      },
+      {
+        "id": "o3-mini",
+        "imagePolicy": "forbidden",
+        "type": "text"
+      },
+      {
+        "id": "mercury-2",
+        "imagePolicy": "forbidden",
+        "type": "text"
+      },
+      {
+        "id": "minimax-m2",
+        "imagePolicy": "forbidden",
+        "type": "text"
+      },
+      {
+        "id": "ling-flash-2.0",
+        "imagePolicy": "forbidden",
+        "type": "text"
+      },
+      {
+        "id": "nova-2-lite",
+        "imagePolicy": "forbidden",
+        "type": "text"
+      },
+      {
+        "id": "gpt-5-nano-high",
+        "imagePolicy": "optional",
+        "type": "text"
+      },
+      {
+        "id": "qwq-32b",
+        "imagePolicy": "forbidden",
+        "type": "text"
+      },
+      {
+        "id": "olmo-3.1-32b-instruct",
+        "imagePolicy": "forbidden",
+        "type": "text"
+      },
+      {
+        "id": "qwen3-30b-a3b",
+        "imagePolicy": "forbidden",
+        "type": "text"
+      },
+      {
+        "id": "molmo-2-8b",
+        "imagePolicy": "optional",
+        "type": "text"
+      },
+      {
+        "id": "ring-flash-2.0",
+        "imagePolicy": "forbidden",
+        "type": "text"
+      },
+      {
+        "id": "gemma-3n-e4b-it",
+        "imagePolicy": "forbidden",
+        "type": "text"
+      },
+      {
+        "id": "llama-3.3-70b-instruct",
+        "imagePolicy": "forbidden",
+        "type": "text"
+      },
+      {
+        "id": "nvidia-nemotron-3-nano-30b-a3b-bf16",
+        "imagePolicy": "forbidden",
+        "type": "text"
+      },
+      {
+        "id": "gpt-oss-20b",
+        "imagePolicy": "forbidden",
+        "type": "text"
+      },
+      {
+        "id": "mercury",
+        "imagePolicy": "forbidden",
+        "type": "text"
+      },
+      {
+        "id": "olmo-3-32b-think",
+        "imagePolicy": "forbidden",
+        "type": "text"
+      },
+      {
+        "id": "mistral-small-3.1-24b-instruct-2503",
+        "imagePolicy": "optional",
+        "type": "text"
+      },
+      {
+        "id": "ibm-granite-h-small",
+        "imagePolicy": "forbidden",
+        "type": "text"
+      },
+      {
+        "id": "olmo-3.1-32b-think",
+        "imagePolicy": "forbidden",
+        "type": "text"
+      },
+      {
+        "id": "ling-2.5-1t",
+        "imagePolicy": "forbidden",
+        "type": "text"
+      },
+      {
+        "id": "ring-2.5-1t",
+        "imagePolicy": "forbidden",
+        "type": "text"
+      },
+      {
+        "id": "seed-1.8",
+        "imagePolicy": "optional",
+        "type": "text"
+      },
+      {
+        "id": "dola-seed-2.0-preview-vision",
+        "imagePolicy": "optional",
+        "type": "text"
+      },
+      {
+        "id": "grok-4-1-fast-non-reasoning",
+        "imagePolicy": "forbidden",
+        "type": "text"
+      },
+      {
+        "id": "amazon.nova-pro-v1:0",
+        "imagePolicy": "optional",
+        "type": "text"
+      },
+      {
+        "id": "qwen3.6-plus",
+        "imagePolicy": "forbidden",
+        "type": "text"
+      },
+      {
+        "id": "qwen3.5-397b-a17b",
+        "imagePolicy": "forbidden",
+        "type": "text"
+      },
+      {
+        "id": "glm-5.1",
+        "imagePolicy": "forbidden",
+        "type": "text"
+      },
+      {
+        "id": "trinity-large-thinking",
+        "imagePolicy": "forbidden",
+        "type": "text"
+      },
+      {
+        "id": "mimo-v2-omni",
+        "imagePolicy": "optional",
+        "type": "text"
+      },
+      {
+        "id": "kimi-k2.5",
+        "imagePolicy": "optional",
+        "type": "text"
+      },
+      {
+        "id": "gpt-5-high-new-system-prompt",
+        "imagePolicy": "optional",
+        "type": "text"
+      },
+      {
+        "id": "qwen3-vl-8b-thinking",
+        "imagePolicy": "optional",
+        "type": "text"
+      },
+      {
+        "id": "ernie-5.0-preview-1220",
+        "imagePolicy": "optional",
+        "type": "text"
+      },
+      {
+        "id": "qwen3-vl-8b-instruct",
+        "imagePolicy": "optional",
+        "type": "text"
+      },
+      {
+        "id": "glm-5v-turbo",
+        "imagePolicy": "forbidden",
+        "type": "text"
+      },
+      {
+        "id": "glm-4.7-flash",
+        "imagePolicy": "forbidden",
+        "type": "text"
+      },
+      {
+        "id": "gemini-3-flash-thinking-minimal",
+        "codeName": "gemini-3-flash (thinking-minimal)",
+        "imagePolicy": "optional",
+        "type": "text"
+      },
+      {
+        "id": "mistral-small-2603",
+        "imagePolicy": "optional",
+        "type": "text"
+      },
+      {
+        "id": "grok-4.20-beta1",
+        "imagePolicy": "forbidden",
+        "type": "text"
+      },
+      {
+        "id": "dola-seed-2.0-preview-text",
+        "imagePolicy": "forbidden",
+        "type": "text"
+      },
+      {
+        "id": "qwen3-max-2025-09-26",
+        "imagePolicy": "forbidden",
+        "type": "text"
+      },
+      {
+        "id": "qwen3-omni-flash",
+        "imagePolicy": "optional",
+        "type": "text"
+      },
+      {
+        "id": "qwen-vl-max-2025-08-13",
+        "imagePolicy": "optional",
+        "type": "text"
+      },
+      {
+        "id": "minimax-m2-preview",
+        "imagePolicy": "forbidden",
+        "type": "text"
+      },
+      {
+        "id": "qwen3-max-thinking",
+        "imagePolicy": "forbidden",
+        "type": "text"
+      },
+      {
+        "id": "gemma-4-26b-a4b",
+        "imagePolicy": "optional",
+        "type": "text"
+      },
+      {
+        "id": "gemma-4-31b",
+        "imagePolicy": "optional",
+        "type": "text"
+      },
+      {
+        "id": "claude-sonnet-4-6-search",
+        "imagePolicy": "forbidden",
+        "type": "text",
+        "search": true
+      },
+      {
+        "id": "gpt-5.2-search",
+        "imagePolicy": "forbidden",
+        "type": "text",
+        "search": true
+      },
+      {
+        "id": "gemini-3-flash-grounding",
+        "imagePolicy": "forbidden",
+        "type": "text",
+        "search": true
+      },
+      {
+        "id": "grok-4.20-multi-agent-beta-0309",
+        "imagePolicy": "forbidden",
+        "type": "text",
+        "search": true
+      },
+      {
+        "id": "grok-4.20-beta1",
+        "imagePolicy": "forbidden",
+        "type": "text",
+        "search": true
+      },
+      {
+        "id": "gpt-5.1-search",
+        "imagePolicy": "forbidden",
+        "type": "text",
+        "search": true
+      },
+      {
+        "id": "grok-4-1-fast-search",
+        "imagePolicy": "forbidden",
+        "type": "text",
+        "search": true
+      },
+      {
+        "id": "gpt-5.2-search-non-reasoning",
+        "imagePolicy": "forbidden",
+        "type": "text",
+        "search": true
+      },
+      {
+        "id": "grok-4-fast-search",
+        "imagePolicy": "forbidden",
+        "type": "text",
+        "search": true
+      },
+      {
+        "id": "o3-search",
+        "imagePolicy": "forbidden",
+        "type": "text",
+        "search": true
+      },
+      {
+        "id": "gemini-2.5-pro-grounding",
+        "imagePolicy": "forbidden",
+        "type": "text",
+        "search": true
+      },
+      {
+        "id": "claude-sonnet-4-5-search",
+        "imagePolicy": "forbidden",
+        "type": "text",
+        "search": true
+      },
+      {
+        "id": "grok-4-search",
+        "imagePolicy": "forbidden",
+        "type": "text",
+        "search": true
+      },
+      {
+        "id": "ppl-sonar-reasoning-pro-high",
+        "imagePolicy": "forbidden",
+        "type": "text",
+        "search": true
+      },
+      {
+        "id": "gpt-5-search",
+        "imagePolicy": "forbidden",
+        "type": "text",
+        "search": true
+      },
+      {
+        "id": "gpt-5.1-search-sp",
+        "imagePolicy": "forbidden",
+        "type": "text",
+        "search": true
+      }
+    ],
+    "navigationHandlers": []
+  },
+  {
+    "file": "nanobananafree_ai.js",
+    "id": "nanobananafree_ai",
+    "displayName": "NanoBananaFree (图片生成)",
+    "description": "使用 NanoBananaFree 平台生成图片，仅支持上传单张图片。需要已登录的 Google 账户。",
+    "models": [
+      {
+        "id": "gemini-2.5-flash-image",
+        "imagePolicy": "optional"
+      }
+    ],
+    "navigationHandlers": []
+  },
+  {
+    "file": "sora.js",
+    "id": "sora",
+    "displayName": "Sora (视频生成)",
+    "description": "使用 OpenAI Sora 生成视频，仅支持上传单张参考图片。需要已登录的 ChatGPT 账户。",
+    "models": [
+      {
+        "id": "sora-2",
+        "imagePolicy": "optional"
+      }
+    ],
+    "navigationHandlers": []
+  },
+  {
+    "file": "test.js",
+    "id": "test",
+    "displayName": "浏览器检测，仅供调试使用",
+    "description": "包含 Cloudflare Turnstile 验证测试、浏览器指纹检测、IP 纯净度查询等功能，仅供调试使用。",
+    "models": [
+      {
+        "id": "cloudflare-turnstile",
+        "imagePolicy": "forbidden",
+        "type": "image",
+        "url": "https://nopecha.com/captcha/turnstile"
+      },
+      {
+        "id": "creepjs",
+        "imagePolicy": "forbidden",
+        "type": "image",
+        "url": "https://abrahamjuliot.github.io/creepjs/"
+      },
+      {
+        "id": "antibot",
+        "imagePolicy": "forbidden",
+        "type": "image",
+        "url": "https://bot.sannysoft.com/"
+      },
+      {
+        "id": "browserleaks-js",
+        "imagePolicy": "forbidden",
+        "type": "image",
+        "url": "https://browserleaks.com/javascript"
+      },
+      {
+        "id": "browserleaks-ip",
+        "imagePolicy": "forbidden",
+        "type": "image",
+        "url": "https://browserleaks.com/ip"
+      },
+      {
+        "id": "ip",
+        "imagePolicy": "forbidden",
+        "type": "text",
+        "url": "https://api.ip.sb/ip"
+      },
+      {
+        "id": "webgl",
+        "imagePolicy": "forbidden",
+        "type": "image",
+        "url": "https://get.webgl.org/"
+      },
+      {
+        "id": "ping0",
+        "imagePolicy": "forbidden",
+        "type": "image",
+        "url": "https://ping0.cc/"
+      }
+    ],
+    "navigationHandlers": []
+  },
+  {
+    "file": "zai_is.js",
+    "id": "zai_is",
+    "displayName": "zAI (图片生成)",
+    "description": "使用 zAI 平台生成图片，支持多种图片生成模型和分辨率选择。需要 Discord 账户登录授权。",
+    "models": [
+      {
+        "id": "gemini-3-pro-image-preview",
+        "codeName": "Nano Banana Pro",
+        "imagePolicy": "optional",
+        "imageSize": "1K"
+      },
+      {
+        "id": "gemini-3-pro-image-preview-2k",
+        "codeName": "Nano Banana Pro",
+        "imagePolicy": "optional",
+        "imageSize": "2K"
+      },
+      {
+        "id": "gemini-3-pro-image-preview-4k",
+        "codeName": "Nano Banana Pro",
+        "imagePolicy": "optional",
+        "imageSize": "4K"
+      },
+      {
+        "id": "gemini-2.5-flash-image",
+        "codeName": "Nano Banana",
+        "imagePolicy": "optional"
+      }
+    ],
+    "navigationHandlers": [
+      null
+    ]
+  },
+  {
+    "file": "zai_is_text.js",
+    "id": "zai_is_text",
+    "displayName": "zAI (文本生成)",
+    "description": "使用 zAI 平台生成文本，支持多种大语言模型。需要 Discord 账户登录授权。",
+    "models": [
+      {
+        "id": "glm-4.6",
+        "codeName": "GLM 4.6",
+        "imagePolicy": "optional"
+      },
+      {
+        "id": "gemini-3-pro-preview",
+        "codeName": "Gemini 3 Pro Preview",
+        "imagePolicy": "optional"
+      },
+      {
+        "id": "gemini-2.5-pro",
+        "codeName": "Gemini 2.5 Pro",
+        "imagePolicy": "optional"
+      },
+      {
+        "id": "gemini-3-flash-preview",
+        "codeName": "Gemini 3 Flash Preview",
+        "imagePolicy": "optional"
+      },
+      {
+        "id": "claude-sonnet-4.5",
+        "codeName": "Claude Sonnet 4.5",
+        "imagePolicy": "optional"
+      },
+      {
+        "id": "claude-sonnet-4",
+        "codeName": "Claude Sonnet 4",
+        "imagePolicy": "optional"
+      },
+      {
+        "id": "claude-haiku-4.5",
+        "codeName": "Claude Haiku 4.5",
+        "imagePolicy": "optional"
+      },
+      {
+        "id": "gpt-5.1",
+        "codeName": "GPT-5.1",
+        "imagePolicy": "optional"
+      },
+      {
+        "id": "gpt-5",
+        "codeName": "GPT-5",
+        "imagePolicy": "optional"
+      },
+      {
+        "id": "gpt-4.1",
+        "codeName": "GPT-4.1",
+        "imagePolicy": "optional"
+      },
+      {
+        "id": "gpt-5.2",
+        "codeName": "GPT-5.2 Chat",
+        "imagePolicy": "optional"
+      },
+      {
+        "id": "o3-high",
+        "codeName": "o3-high",
+        "imagePolicy": "optional"
+      },
+      {
+        "id": "o3-mini",
+        "codeName": "o3-mini",
+        "imagePolicy": "optional"
+      },
+      {
+        "id": "o4-mini",
+        "codeName": "o4-mini",
+        "imagePolicy": "optional"
+      },
+      {
+        "id": "grok-4.1-fast",
+        "codeName": "Grok 4.1 Fast",
+        "imagePolicy": "optional"
+      },
+      {
+        "id": "grok-4",
+        "codeName": "Grok 4",
+        "imagePolicy": "optional"
+      },
+      {
+        "id": "kimi-k2-thinking",
+        "codeName": "Kimi K2 Thinking",
+        "imagePolicy": "optional"
+      }
+    ],
+    "navigationHandlers": [
+      null
+    ]
+  },
+  {
+    "file": "zenmux_ai_text.js",
+    "id": "zenmux_ai_text",
+    "displayName": "Zenmux AI (文本生成)",
+    "description": "使用 Zenmux AI 平台生成文本，支持多种大语言模型。需要已登录的 ZenMux 账户。",
+    "configSchema": [],
+    "models": [
+      {
+        "id": "gemini-3-flash-preview",
+        "codeName": "google/gemini-3-flash-preview-free",
+        "imagePolicy": "optional",
+        "type": "text",
+        "providers": [
+          "google-vertex"
+        ]
+      },
+      {
+        "id": "mimo-v2-flash",
+        "codeName": "xiaomi/mimo-v2-flash",
+        "imagePolicy": "forbidden",
+        "type": "text",
+        "providers": [
+          "xiaomi"
+        ]
+      },
+      {
+        "id": "glm-4.6v-flash",
+        "codeName": "z-ai/glm-4.6v-flash",
+        "imagePolicy": "optional",
+        "type": "text",
+        "providers": [
+          "z-ai"
+        ]
+      },
+      {
+        "id": "mistral-large-2512",
+        "codeName": "mistralai/mistral-large-2512",
+        "imagePolicy": "optional",
+        "type": "text",
+        "providers": [
+          "azure"
+        ]
+      },
+      {
+        "id": "deepseek-v3.2",
+        "codeName": "deepseek/deepseek-chat",
+        "imagePolicy": "forbidden",
+        "type": "text",
+        "providers": [
+          "deepseek"
+        ]
+      },
+      {
+        "id": "deepseek-v3.2-thinking",
+        "codeName": "deepseek/deepseek-reasoner",
+        "imagePolicy": "forbidden",
+        "type": "text",
+        "providers": [
+          "deepseek"
+        ]
+      },
+      {
+        "id": "grok-4.1-fast",
+        "codeName": "x-ai/grok-4.1-fast",
+        "imagePolicy": "optional",
+        "type": "text",
+        "providers": [
+          "x-ai"
+        ]
+      },
+      {
+        "id": "grok-4.1-fast-non-reasoning",
+        "codeName": "x-ai/grok-4.1-fast-non-reasoning",
+        "imagePolicy": "optional",
+        "type": "text",
+        "providers": [
+          "x-ai"
+        ]
+      },
+      {
+        "id": "gpt-5.1-codex-mini",
+        "codeName": "openai/gpt-5.1-codex-mini",
+        "imagePolicy": "optional",
+        "type": "text",
+        "providers": [
+          "openai"
+        ]
+      },
+      {
+        "id": "ernie-5.0-thinking-preview",
+        "codeName": "baidu/ernie-5.0-thinking-preview",
+        "imagePolicy": "optional",
+        "type": "text",
+        "providers": [
+          "baidu"
+        ]
+      },
+      {
+        "id": "doubao-seed-code",
+        "codeName": "volcengine/doubao-seed-code",
+        "imagePolicy": "optional",
+        "type": "text",
+        "providers": [
+          "volcengine"
+        ]
+      },
+      {
+        "id": "kimi-k2-thinking",
+        "codeName": "moonshotai/kimi-k2-thinking",
+        "imagePolicy": "forbidden",
+        "type": "text",
+        "providers": [
+          "moonshotai"
+        ]
+      },
+      {
+        "id": "minimax-m2",
+        "codeName": "minimax/minimax-m2",
+        "imagePolicy": "forbidden",
+        "type": "text",
+        "providers": [
+          "minimax"
+        ]
+      },
+      {
+        "id": "kat-coder-pro-v1",
+        "codeName": "kuaishou/kat-coder-pro-v1",
+        "imagePolicy": "forbidden",
+        "type": "text",
+        "providers": [
+          "streamlake"
+        ]
+      },
+      {
+        "id": "glm-4.6",
+        "codeName": "z-ai/glm-4.6",
+        "imagePolicy": "forbidden",
+        "type": "text",
+        "providers": [
+          "z-ai"
+        ]
+      },
+      {
+        "id": "claude-sonnet-4.5",
+        "codeName": "anthropic/claude-sonnet-4.5",
+        "imagePolicy": "optional",
+        "type": "text",
+        "providers": [
+          "anthropic"
+        ]
+      },
+      {
+        "id": "qwen3-max",
+        "codeName": "qwen/qwen3-max",
+        "imagePolicy": "forbidden",
+        "type": "text",
+        "providers": [
+          "alibaba"
+        ]
+      },
+      {
+        "id": "grok-4-fast",
+        "codeName": "x-ai/grok-4-fast",
+        "imagePolicy": "optional",
+        "type": "text",
+        "providers": [
+          "x-ai"
+        ]
+      },
+      {
+        "id": "grok-4-fast-non-reasoning",
+        "codeName": "x-ai/grok-4-fast-non-reasoning",
+        "imagePolicy": "optional",
+        "type": "text",
+        "providers": [
+          "x-ai"
+        ]
+      },
+      {
+        "id": "grok-code-fast-1",
+        "codeName": "x-ai/grok-code-fast-1",
+        "imagePolicy": "forbidden",
+        "type": "text",
+        "providers": [
+          "x-ai"
+        ]
+      },
+      {
+        "id": "deepseek-v3.1",
+        "codeName": "deepseek/deepseek-chat-v3.1",
+        "imagePolicy": "forbidden",
+        "type": "text",
+        "providers": [
+          "theta"
+        ]
+      },
+      {
+        "id": "gpt-5-mini",
+        "codeName": "openai/gpt-5-mini",
+        "imagePolicy": "optional",
+        "type": "text",
+        "providers": [
+          "openai"
+        ]
+      },
+      {
+        "id": "gpt-5-nano",
+        "codeName": "openai/gpt-5-nano",
+        "imagePolicy": "optional",
+        "type": "text",
+        "providers": [
+          "openai"
+        ]
+      },
+      {
+        "id": "glm-4.5-air",
+        "codeName": "z-ai/glm-4.5-air",
+        "imagePolicy": "forbidden",
+        "type": "text",
+        "providers": [
+          "z-ai"
+        ]
+      },
+      {
+        "id": "gemini-2.5-flash-lite",
+        "codeName": "google/gemini-2.5-flash-lite",
+        "imagePolicy": "optional",
+        "type": "text",
+        "providers": [
+          "google-vertex"
+        ]
+      },
+      {
+        "id": "gemini-2.5-flash",
+        "codeName": "google/gemini-2.5-flash",
+        "imagePolicy": "optional",
+        "type": "text",
+        "providers": [
+          "google-vertex"
+        ]
+      },
+      {
+        "id": "deepseek-r1-0528",
+        "codeName": "deepseek/deepseek-r1-0528",
+        "imagePolicy": "forbidden",
+        "type": "text",
+        "providers": [
+          "theta"
+        ]
+      },
+      {
+        "id": "claude-sonnet-4",
+        "codeName": "anthropic/claude-sonnet-4",
+        "imagePolicy": "optional",
+        "type": "text",
+        "providers": [
+          "anthropic"
+        ]
+      },
+      {
+        "id": "qwen3-14b",
+        "codeName": "qwen/qwen3-14b",
+        "imagePolicy": "optional",
+        "type": "text",
+        "providers": [
+          "theta"
+        ]
+      },
+      {
+        "id": "o4-mini",
+        "codeName": "openai/o4-mini",
+        "imagePolicy": "optional",
+        "type": "text",
+        "providers": [
+          "openai"
+        ]
+      },
+      {
+        "id": "gpt-4.1-mini",
+        "codeName": "openai/gpt-4.1-mini",
+        "imagePolicy": "optional",
+        "type": "text",
+        "providers": [
+          "openai"
+        ]
+      },
+      {
+        "id": "gpt-4.1-nano",
+        "codeName": "openai/gpt-4.1-nano",
+        "imagePolicy": "optional",
+        "type": "text",
+        "providers": [
+          "openai"
+        ]
+      },
+      {
+        "id": "gemini-2.0-flash-lite",
+        "codeName": "google/gemini-2.0-flash-lite-001",
+        "imagePolicy": "optional",
+        "type": "text",
+        "providers": [
+          "google-vertex"
+        ]
+      },
+      {
+        "id": "claude-3.7-sonnet",
+        "codeName": "anthropic/claude-3.7-sonnet",
+        "imagePolicy": "optional",
+        "type": "text",
+        "providers": [
+          "anthropic"
+        ]
+      },
+      {
+        "id": "gemini-2.0-flash",
+        "codeName": "google/gemini-2.0-flash",
+        "imagePolicy": "optional",
+        "type": "text",
+        "providers": [
+          "google-vertex"
+        ]
+      },
+      {
+        "id": "claude-3.5-sonnet",
+        "codeName": "anthropic/claude-3.5-sonnet",
+        "imagePolicy": "optional",
+        "type": "text",
+        "providers": [
+          "anthropic"
+        ]
+      }
+    ],
+    "navigationHandlers": []
+  }
+]
