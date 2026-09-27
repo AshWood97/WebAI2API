@@ -97,6 +97,9 @@ jobs:
       - name: Build RS image
         run: docker build -f WebAI2API-RS/Dockerfile -t webai2api-rs:ci .
 
+      - name: Launch and close Camoufox in Linux image
+        run: docker run --rm --shm-size=2g --entrypoint node webai2api-rs:ci /app/rs/bridge/browser-smoke.mjs
+
       - name: Start isolated RS container and smoke test
         shell: bash
         run: |
