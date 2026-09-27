@@ -23,6 +23,12 @@ async function handle(method, params) {
             return { ok: true };
         case 'init':
             if (process.env.MOCK_INIT_FAIL === '1') throw new Error('模拟初始化失败');
+            if (process.env.MOCK_INIT_STARTED_FILE) {
+                fs.writeFileSync(process.env.MOCK_INIT_STARTED_FILE, String(process.pid));
+            }
+            if (process.env.MOCK_INIT_DELAY_MS) {
+                await new Promise(r => setTimeout(r, Number(process.env.MOCK_INIT_DELAY_MS)));
+            }
             return { ok: true, workers: [{ name: 'w1', engine: 'camoufox', instanceName: 'main', type: 'mock' }], browserCount: 1 };
         case 'getModels':
             return { object: 'list', data: models.data.map(m => ({ ...m, image_policy: m.imagePolicy })) };
@@ -51,14 +57,24 @@ async function handle(method, params) {
         case 'generate': {
             const prompt = params.prompt || '';
             if (prompt.includes('失败')) return { error: '生成失败(模拟)', code: 'CONTENT_BLOCKED', retryable: false };
-            if (prompt.includes('crash-bridge')) process.exit(1);
+            if (prompt.includes('crash-bridge')) {
+                if (process.env.MOCK_DESCENDANT_MARKER) {
+                    const marker = process.env.MOCK_DESCENDANT_MARKER;
+                    const child = await import('node:child_process');
+                    child.spawn(process.execPath, ['-e', `setTimeout(() => require('node:fs').writeFileSync(${JSON.stringify(marker)}, 'alive'), 1500); setInterval(() => {}, 1000)`], { stdio: 'ignore' });
+                }
+                process.exit(1);
+            }
             if (prompt.includes('slow')) await new Promise(r => setTimeout(r, 1500));
             return { text: `echo:${prompt}`, reasoning: params.reasoning ? 'mock-reasoning' : undefined };
         }
         case 'downloadViaContext':
             return { path: '/tmp/mock.png', mime: 'image/png' };
         case 'shutdown':
-            setTimeout(() => process.exit(0), 50);
+            setTimeout(() => {
+                try { fs.unlinkSync(sock); } catch {}
+                process.exit(0);
+            }, 50);
             return { ok: true };
         default:
             throw new Error(`未知方法: ${method}`);
