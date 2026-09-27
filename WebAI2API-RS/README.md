@@ -59,8 +59,9 @@ cargo build --release
   并将用户配置文件、日志、历史和临时文件都放在该目录。Node 桥通过工作目录中的
   `data` 链接读取同一份配置和状态，不需要改动原 Node 源码。
 - `data/history/history.db` 表结构不变，可直接打开原有数据库。
-- WebUI 从 checkout 内 `webui/dist` 加载，开发与新 checkout 无需 `webui-dist` 符号链接；
-  也可用 `WEBAI2API_WEBUI_DIR` 显式指定构建目录。
+- WebUI 从 checkout 内 `webui/dist` 加载；`webui-dist` 是指向该目录的相对符号链接。
+  可用 `WEBAI2API_WEBUI_DIR` 指定其他目录。重建时在仓库根目录执行
+  `npm ci --prefix webui --ignore-scripts && npm --prefix webui run build`；Docker 构建会自行编译 WebUI。
 - 保留原版的已知行为：非流式 429 文案里的队列上限显示为 `undefined`、
   `/v1/chat/completions` 前缀匹配、流式请求不受队列上限约束。
 - 配置写回是合并式的：只更新提交的键，其余键保留。YAML 注释仍会在写回时丢失，

@@ -10,6 +10,13 @@ COPY WebAI2API-RS/bridge ./bridge
 COPY WebAI2API-RS/scripts ./scripts
 RUN cargo build --release
 
+FROM node:22-bookworm AS webui-build
+WORKDIR /webui
+COPY webui/package.json webui/package-lock.json ./
+RUN npm ci --ignore-scripts
+COPY webui/ ./
+RUN npm run build
+
 FROM node:22-bookworm
 WORKDIR /app
 
@@ -42,7 +49,7 @@ COPY --from=rust-build /src/target/release/webai2api-genkey /usr/local/bin/webai
 # 桥、辅助脚本与 WebUI 放在独立目录，避免覆盖原仓库的 scripts/
 COPY WebAI2API-RS/bridge /opt/webai2api/bridge
 COPY WebAI2API-RS/scripts /opt/webai2api/scripts
-COPY webui/dist /opt/webai2api/webui-dist
+COPY --from=webui-build /webui/dist /opt/webai2api/webui-dist
 
 EXPOSE 3000 5900
 

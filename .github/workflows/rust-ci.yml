@@ -8,12 +8,24 @@ on:
       - '.github/workflows/rust-ci.yml'
       - 'src/**'
       - 'bridge/**'
+      - 'package.json'
+      - 'pnpm-lock.yaml'
+      - 'pnpm-workspace.yaml'
+      - 'patches/**'
+      - 'scripts/**'
+      - 'webui/**'
   pull_request:
     paths:
       - 'WebAI2API-RS/**'
       - '.github/workflows/rust-ci.yml'
       - 'src/**'
       - 'bridge/**'
+      - 'package.json'
+      - 'pnpm-lock.yaml'
+      - 'pnpm-workspace.yaml'
+      - 'patches/**'
+      - 'scripts/**'
+      - 'webui/**'
 
 env:
   CARGO_TERM_COLOR: always
@@ -39,9 +51,11 @@ jobs:
         with:
           node-version: '22'
 
-      # mock 引擎桥与集成测试需要 node；不安装浏览器内核
-      - name: Install Node dependencies
-        run: npm ci --ignore-scripts || npm install --ignore-scripts
+      - name: Build WebUI from a fresh checkout
+        run: npm ci --prefix ../webui --ignore-scripts && npm --prefix ../webui run build
+
+      - name: Check WebUI output
+        run: test -s webui-dist/index.html
 
       - name: Set up Rust
         uses: dtolnay/rust-action@stable
@@ -72,3 +86,57 @@ jobs:
 
       - name: cargo build --release
         run: cargo build --release
+
+  docker-smoke:
+    name: Docker build / startup / WebUI
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Build RS image
+        run: docker build -f WebAI2API-RS/Dockerfile -t webai2api-rs:ci .
+
+      - name: Start isolated RS container and smoke test
+        shell: bash
+        run: |
+          set -euo pipefail
+          smoke_data="$(mktemp -d)"
+          trap 'docker rm -f webai2api-rs-smoke >/dev/null 2>&1 || true; rm -rf "$smoke_data"' EXIT
+          cat > "$smoke_data/config.yaml" <<'YAML'
+          server:
+            port: 3000
+            auth: smoke-secret
+          backend:
+            pool:
+              instances:
+                - name: smoke
+                  workers:
+                    - name: smoke
+                      type: smoke-unconfigured
+          YAML
+          docker run -d --name webai2api-rs-smoke \
+            -p 127.0.0.1:3100:3000 \
+            -v "$smoke_data:/app/data" \
+            --shm-size=2g webai2api-rs:ci
+          ready=0
+          for _ in $(seq 1 120); do
+            if curl -fsS http://127.0.0.1:3100/health >/dev/null; then
+              ready=1
+              break
+            fi
+            if ! docker ps --format '{{.Names}}' | grep -qx webai2api-rs-smoke; then
+              docker logs webai2api-rs-smoke
+              exit 1
+            fi
+            sleep 1
+          done
+          if [ "$ready" -ne 1 ]; then
+            docker logs webai2api-rs-smoke
+            exit 1
+          fi
+          curl -fsS http://127.0.0.1:3100/ >/dev/null
+          curl -fsS -H 'Authorization: Bearer smoke-secret' \
+            http://127.0.0.1:3100/admin/status >/dev/null
+          test "$(curl -sS -o /dev/null -w '%{http_code}' \
+            http://127.0.0.1:3100/admin/status)" = 401
