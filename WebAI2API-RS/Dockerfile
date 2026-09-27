@@ -1,11 +1,12 @@
 # WebAI2API-RS 镜像。构建上下文是原仓库根目录：
 #   docker build -f WebAI2API-RS/Dockerfile .
-# 第一阶段编译 Rust 二进制，第二阶段用 Node 运行时承载引擎桥和浏览器内核。
+# Rust 编译、WebUI 构建和 Node 浏览器运行时分阶段构建。
 
 FROM rust:1.98-bookworm AS rust-build
 WORKDIR /src
 COPY WebAI2API-RS/Cargo.toml WebAI2API-RS/Cargo.lock ./
 COPY WebAI2API-RS/src ./src
+COPY WebAI2API-RS/catalog ./catalog
 COPY WebAI2API-RS/bridge ./bridge
 COPY WebAI2API-RS/scripts ./scripts
 RUN cargo build --release
@@ -37,7 +38,7 @@ RUN apt-get update && apt-get install -y \
     python3 build-essential \
     && rm -rf /var/lib/apt/lists/*
 
-# 原仓库源码与依赖：引擎桥直接 import 它们，不复制代码
+# 初始化阶段复用安装脚本和依赖；最终镜像不保留原 Node 后端源码。
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
 COPY src ./src
 COPY scripts ./scripts
@@ -55,5 +56,5 @@ COPY --from=webui-build /webui/dist /app/rs/webui-dist
 
 EXPOSE 3000 5900
 
-# --src-root 指向本目录（含 src/ 与 camoufox/），数据在 /app/data
+# --src-root 指向浏览器内核和 package.json 所在目录，数据在 /app/data
 CMD ["webai2api", "--src-root", "/app", "--data-dir", "/app/data", "-xvfb", "-vnc"]

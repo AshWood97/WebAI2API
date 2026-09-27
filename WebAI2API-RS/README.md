@@ -55,7 +55,7 @@ cd WebAI2API-RS
 
 生成密钥：`./target/release/webai2api-genkey`，输出 `sk-` 加 48 位十六进制。
 
-运行要求：稳定版 Rust、Node.js 20+，以及原仓库已安装的依赖
+运行要求：Rust 1.88+、Node.js 20+，以及原仓库已安装的依赖
 （`camoufox-js`、`clearcote`、`playwright-core` 等）。浏览器内核仍由
 `npm run init` 下载到原仓库的 `camoufox/` 目录。
 
