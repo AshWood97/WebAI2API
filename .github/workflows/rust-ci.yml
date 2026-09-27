@@ -124,8 +124,7 @@ jobs:
           docker run -d --name webai2api-rs-smoke \
             -p 127.0.0.1:3100:3000 \
             -v "$smoke_data:/app/data" \
-            --shm-size=2g webai2api-rs:ci \
-            webai2api --src-root /app --data-dir /app/data
+            --shm-size=2g webai2api-rs:ci
           ready=0
           for _ in $(seq 1 120); do
             if curl -fsS http://127.0.0.1:3100/health >/dev/null; then

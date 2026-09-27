@@ -59,6 +59,22 @@ cd WebAI2API-RS
 （`camoufox-js`、`clearcote`、`playwright-core` 等）。浏览器内核仍由
 `npm run init` 下载到原仓库的 `camoufox/` 目录。
 
+## Docker
+
+从仓库根目录构建；镜像会编译 Rust、WebUI 并安装浏览器内核。运行前把配置放入
+独立的数据目录，容器内监听端口由该目录的 `config.yaml` 中 `server.port` 决定。
+
+```bash
+docker build -f WebAI2API-RS/Dockerfile -t webai2api-rs:local .
+mkdir -p rs-data
+cp data/config.yaml rs-data/config.yaml
+docker run --rm --name webai2api-rs -p 3100:3000 --shm-size=2g \
+  -v "$PWD/rs-data:/app/data" webai2api-rs:local
+```
+
+上述端口映射要求容器配置为 `server.port: 3000`；保留 Node 对照服务时可在宿主机
+使用 3100。默认入口启用 Xvfb/VNC；生产桥只加载镜像内的浏览器 SDK，不加载原 Node 后端。
+
 ## 兼容性
 
 - 默认读取原仓库的 `data/config.yaml`；指定 `--data-dir` 后从该目录读取配置，
@@ -78,8 +94,8 @@ cd WebAI2API-RS
 ```bash
 cargo fmt --all --check
 cargo clippy --all-targets -- -D warnings
-cargo test --all-targets -- --test-threads=1  # Rust 单测与 HTTP/进程集成测试
-node --test bridge/browser-runtime.test.mjs   # 12 项通用桥协议测试
+cargo test --all-targets -- --test-threads=1  # 135 单测 + 10 集成测试
+node --test bridge/browser-runtime.test.mjs   # 13 项通用桥协议测试
 ```
 
 集成测试覆盖旧 mock 桥兼容与通用浏览器 RPC 到 Rust 适配器的 HTTP 生成链路，

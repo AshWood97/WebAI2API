@@ -11,7 +11,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **业务边界**：HTTP、队列、配置、历史、统计、日志、进程管理、Worker 选择、模型目录、merge、故障转移和 19 个站点的页面流程均在 Rust。Node 子进程只管理 Camoufox/Clearcote 浏览器 SDK，并提供通用页面、事件、路由和下载 RPC；生产入口不再导入原 Node 后端或站点适配器
 - **站点契约**：19 个适配器的模型元数据、导航、上传、响应解析与错误判断已迁移；模型目录保持 318 项原始记录，配置文件、模型 ID 和历史库兼容
-- **测试**：Rust 单测、HTTP/进程集成测试和通用桥协议测试；包含 Rust 适配器的 mock 浏览器端到端生成、启动期间 SIGTERM、桥崩溃孙进程、并发配置提交和历史媒体删除
+- **测试**：135 个 Rust 单测、10 个 HTTP/进程集成测试和 13 个通用桥协议测试；包含 Rust 适配器的 mock 浏览器端到端生成、启动期间 SIGTERM、桥崩溃孙进程、并发配置提交和历史媒体删除
 - **部署**：Docker 构建编译 WebUI；Linux CI 配置为构建并启动 RS 镜像，检查真实 Camoufox 启停与 HTTP/WebUI；macOS 本机真实浏览器启停已验证
 - **停机正确性**：`/admin/stop`、IPC `STOP`、Ctrl-C、SIGTERM 收敛到同一条清理通道（桥 shutdown → 杀进程组 → 清锁）；桥 setsid 自成进程组，camoufox 孙进程不会成为孤儿
 - **预检**：启动时经通用桥检查所选浏览器引擎的依赖、内核、补丁和 GeoIP，失败以退出码 78 明确退出
