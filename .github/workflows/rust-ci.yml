@@ -106,7 +106,7 @@ jobs:
         run: |
           set -euo pipefail
           smoke_data="$(mktemp -d)"
-          trap 'docker rm -f webai2api-rs-smoke >/dev/null 2>&1 || true; rm -rf "$smoke_data"' EXIT
+          trap 'docker rm -f webai2api-rs-smoke >/dev/null 2>&1 || true; sudo rm -rf "$smoke_data"' EXIT
           cat > "$smoke_data/config.yaml" <<'YAML'
           server:
             port: 3000
@@ -117,12 +117,15 @@ jobs:
                 - name: smoke
                   workers:
                     - name: smoke
-                      type: smoke-unconfigured
+                      type: test
+          browser:
+            headless: true
           YAML
           docker run -d --name webai2api-rs-smoke \
             -p 127.0.0.1:3100:3000 \
             -v "$smoke_data:/app/data" \
-            --shm-size=2g webai2api-rs:ci
+            --shm-size=2g webai2api-rs:ci \
+            webai2api --src-root /app --data-dir /app/data
           ready=0
           for _ in $(seq 1 120); do
             if curl -fsS http://127.0.0.1:3100/health >/dev/null; then

@@ -472,7 +472,12 @@ mod tests {
         let listener = tokio::net::UnixListener::bind(&sock).unwrap();
         tokio::spawn(async move {
             while let Ok((s, _)) = listener.accept().await {
-                drop(s);
+                // Keep requests pending long enough to inspect the queue. An
+                // immediate disconnect races the status assertion on CI.
+                tokio::spawn(async move {
+                    let _socket = s;
+                    tokio::time::sleep(std::time::Duration::from_secs(5)).await;
+                });
             }
         });
         Bridge::connect(sock, |_| {}).await.unwrap()
