@@ -1,13 +1,13 @@
 //! HTTP 服务，路由与行为对应原 `src/server/api/`。
 //! 路由顺序：免鉴权诊断端点 → 静态 WebUI → Bearer 鉴权 → /admin → /v1。
 
-use crate::bridge::Bridge;
 use crate::config::{self, ConfigError};
 use crate::errors::error_detail;
 use crate::history::{self, ListFilter, RecordUpdate};
 use crate::parse::{self, ParseError};
 use crate::queue::{Queue, Task};
 use crate::respond::{self, anthropic_error_event};
+use crate::runtime::BackendRuntime;
 use crate::stats;
 use axum::body::Body;
 use axum::extract::{DefaultBodyLimit, State};
@@ -29,7 +29,7 @@ pub type RestartCallback = Mutex<Option<Box<dyn Fn(Vec<String>) + Send + Sync>>>
 
 pub struct AppState {
     pub config: Value,
-    pub bridge: Bridge,
+    pub bridge: BackendRuntime,
     pub queue: Queue,
     pub webui_dir: PathBuf,
     pub data_dir: PathBuf,

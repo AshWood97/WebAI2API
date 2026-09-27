@@ -3,9 +3,12 @@
 //! 流式请求永不拒绝（保留原行为）。生成期间每 3 秒发一次心跳，
 //! 结束后一次性回放单个 chunk + [DONE]（伪流式，与原版一致）。
 
-use crate::bridge::{Bridge, GenerateResult};
+#[cfg(test)]
+use crate::bridge::Bridge;
+use crate::bridge::GenerateResult;
 use crate::history::{self, NewRecord, RecordUpdate};
 use crate::respond;
+use crate::runtime::BackendRuntime;
 use crate::stats;
 use serde_json::{json, Value};
 use std::path::PathBuf;
@@ -54,8 +57,8 @@ pub struct Queue {
 }
 
 impl Queue {
-    pub fn new(
-        bridge: Bridge,
+    pub fn new<B: Into<BackendRuntime>>(
+        backend: B,
         max_concurrent: u64,
         queue_buffer: u64,
         keepalive_mode: String,
@@ -77,7 +80,7 @@ impl Queue {
         };
         tokio::spawn(run_queue(
             rx,
-            bridge,
+            backend.into(),
             inner,
             processing_count,
             max_concurrent,
@@ -164,7 +167,7 @@ impl Queue {
 #[allow(clippy::too_many_arguments)]
 async fn run_queue(
     mut rx: mpsc::UnboundedReceiver<Task>,
-    bridge: Bridge,
+    backend: BackendRuntime,
     inner: Arc<QueueInner>,
     processing_count: Arc<AtomicU64>,
     max_concurrent: u64,
@@ -182,13 +185,13 @@ async fn run_queue(
         });
         processing_count.fetch_add(1, Ordering::Relaxed);
         inner.waiting.lock().unwrap().retain(|t| t.id != task.id);
-        let bridge = bridge.clone();
+        let backend = backend.clone();
         let inner = Arc::clone(&inner);
         let processing_count = Arc::clone(&processing_count);
         let keepalive_mode = keepalive_mode.clone();
         let task_id = task.id.clone();
         tokio::spawn(async move {
-            process_task(task, &bridge, keepalive_mode, image_markdown).await;
+            process_task(task, &backend, keepalive_mode, image_markdown).await;
             inner.processing.lock().unwrap().retain(|t| t.id != task_id);
             processing_count.fetch_sub(1, Ordering::Relaxed);
             drop(permit);
@@ -196,13 +199,18 @@ async fn run_queue(
             if processing_count.load(Ordering::Relaxed) == 0
                 && inner.waiting.lock().unwrap().is_empty()
             {
-                let _ = bridge.navigate_to_monitor().await;
+                let _ = backend.navigate_to_monitor().await;
             }
         });
     }
 }
 
-async fn process_task(task: Task, bridge: &Bridge, keepalive_mode: String, image_markdown: bool) {
+async fn process_task(
+    task: Task,
+    backend: &BackendRuntime,
+    keepalive_mode: String,
+    image_markdown: bool,
+) {
     let started = std::time::Instant::now();
     // 对齐 better-sqlite3 的数组绑定行为：input_images 存 JSON 字符串（空数组为 "[]"）
     let image_path_strings: Vec<String> = task
@@ -244,7 +252,7 @@ async fn process_task(task: Task, bridge: &Bridge, keepalive_mode: String, image
     };
 
     let paths = image_path_strings;
-    let result = bridge
+    let result = backend
         .generate(
             &task.id,
             &task.prompt,

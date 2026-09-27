@@ -5,8 +5,9 @@ use crate::bridge;
 use crate::config::{self, ConfigError};
 use crate::instance_lock::release_lock;
 use crate::logfmt;
+use crate::runtime::{self, BackendRuntime, RustRuntime};
 use crate::server::{self, AppState, VncInfo};
-use serde_json::{json, Value};
+use serde_json::json;
 use std::future::IntoFuture;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
@@ -371,89 +372,107 @@ pub async fn run_server(
     // Unix socket path lengths are limited (about 104 bytes on macOS). Keep the
     // IPC name short; browser output and bridge scratch files still use data_dir.
     let sock = std::env::temp_dir().join(format!("w2a-{}.sock", std::process::id()));
-    let bridge_script = opts
-        .bridge_script
-        .clone()
-        .unwrap_or_else(|| install_dir().join("bridge/bridge.mjs"));
     let node = std::env::var("WEBAI2API_NODE").unwrap_or_else(|_| "node".to_string());
     let login = opts
         .login
         .as_deref()
         .map(|s| if s.is_empty() { "1" } else { s });
-    let spawned = tokio::select! {
+    let start = async {
+        if let Some(bridge_script) = opts.bridge_script.as_ref() {
+            // Explicit bridge injection is retained for mock IPC integration tests.
+            let (mut child, bridge_client) = bridge::spawn_bridge(
+                &node,
+                bridge_script,
+                root,
+                &sock,
+                login,
+                &temp_dir,
+                &opts.extra_envs,
+            )
+            .await
+            .map_err(|error| RunError::Retryable(error.to_string()))?;
+            if let Err(error) = bridge_client.preflight().await {
+                kill_tree(child.id().unwrap_or_default());
+                let _ = child.wait().await;
+                return Err(RunError::Fatal(format!("启动预检失败: {error}")));
+            }
+            let mut safe_mode = None;
+            let snapshot = match bridge_client.init(&config).await {
+                Ok(value) => value.get("workers").cloned().unwrap_or(json!([])),
+                Err(error) => {
+                    safe_mode = Some(error.to_string());
+                    json!([])
+                }
+            };
+            Ok((
+                child,
+                BackendRuntime::Legacy(bridge_client),
+                snapshot,
+                false,
+                safe_mode,
+            ))
+        } else {
+            let bridge_script = install_dir().join("bridge/browser-runtime.mjs");
+            let (mut child, rpc) = runtime::spawn_browser_rpc(
+                &node,
+                &bridge_script,
+                root,
+                &sock,
+                &temp_dir,
+                opts.login.is_some(),
+                &opts.extra_envs,
+            )
+            .await
+            .map_err(|error| RunError::Retryable(error.to_string()))?;
+            if let Err(error) = rpc.preflight().await {
+                kill_tree(child.id().unwrap_or_default());
+                let _ = child.wait().await;
+                return Err(RunError::Fatal(format!("启动预检失败: {error}")));
+            }
+            match RustRuntime::initialize(rpc.clone(), config.clone()).await {
+                Ok(runtime) => {
+                    let snapshot = runtime.worker_snapshot();
+                    Ok((
+                        child,
+                        BackendRuntime::Rust(Arc::new(runtime)),
+                        snapshot,
+                        false,
+                        None,
+                    ))
+                }
+                Err(error) => {
+                    logfmt::error("服务器", &format!("工作池初始化失败: {error}"));
+                    let runtime = RustRuntime::empty(rpc, config.clone());
+                    Ok((
+                        child,
+                        BackendRuntime::Rust(Arc::new(runtime)),
+                        json!([]),
+                        false,
+                        Some(error),
+                    ))
+                }
+            }
+        }
+    };
+    let started = tokio::select! {
         biased;
         _ = &mut shutdown => return Ok(()),
-        result = bridge::spawn_bridge(
-            &node,
-            &bridge_script,
-            root,
-            &sock,
-            login,
-            &temp_dir,
-            &opts.extra_envs,
-        ) => result,
-    };
-    let (mut child, bridge_client) = spawned.map_err(|e| RunError::Retryable(e.to_string()))?;
-    let bridge_pid = child.id().unwrap_or(0);
-
+        result = start => result,
+    }?;
+    let (mut child, backend, worker_snapshot, browser_stopped, safe_mode) = started;
+    let bridge_pid = child.id().unwrap_or_default();
     tokio::select! {
         biased;
         _ = &mut shutdown => {
-            shutdown_bridge(&bridge_client, bridge_pid, &mut child).await;
+            shutdown_bridge(&backend, bridge_pid, &mut child).await;
             return Ok(());
         }
         _ = std::future::ready(()) => {}
     }
 
-    // 启动预检（对齐 server.js 的 runPreflight）：依赖损坏/内核缺失时致命退出
-    let preflight = tokio::select! {
-        result = bridge_client.preflight() => Some(result),
-        _ = &mut shutdown => None,
-    };
-    let Some(preflight) = preflight else {
-        shutdown_bridge(&bridge_client, bridge_pid, &mut child).await;
-        return Ok(());
-    };
-    if let Err(e) = preflight {
-        logfmt::error("服务器", &format!("启动预检失败: {e}"));
-        kill_tree(bridge_pid);
-        let _ = child.wait().await;
-        return Err(RunError::Fatal(format!("启动预检失败: {e}")));
-    }
-
-    // 初始化浏览器池；失败进入安全模式（HTTP 仍启动，/v1 返回 503）
-    let mut safe_mode: Option<String> = None;
-    let mut worker_snapshot = json!({"workers": []});
-    let mut browser_stopped = false;
-    let init = tokio::select! {
-        result = bridge_client.init(&config) => Some(result),
-        _ = &mut shutdown => None,
-    };
-    let Some(init) = init else {
-        shutdown_bridge(&bridge_client, bridge_pid, &mut child).await;
-        return Ok(());
-    };
-    match init {
-        Ok(v) => {
-            worker_snapshot = v.get("workers").cloned().unwrap_or(json!([]));
-            browser_stopped = v
-                .get("browserStopped")
-                .and_then(Value::as_bool)
-                .unwrap_or(false);
-        }
-        Err(e) => {
-            logfmt::error("服务器", &format!("工作池初始化失败: {e}"));
-            logfmt::warn(
-                "服务器",
-                "进入安全模式：WebUI 和 Admin API 可用，OpenAI API 不可用",
-            );
-            safe_mode = Some(e.to_string());
-        }
-    }
-
     let (restart_tx, mut restart_rx) = mpsc::unbounded_channel::<Vec<String>>();
     let queue = crate::queue::Queue::new(
-        bridge_client.clone(),
+        backend.clone(),
         config::max_concurrent(&config),
         config::queue_buffer(&config),
         config::keepalive_mode(&config),
@@ -461,7 +480,7 @@ pub async fn run_server(
     );
     let state = Arc::new(AppState {
         config: config.clone(),
-        bridge: bridge_client.clone(),
+        bridge: backend.clone(),
         queue,
         webui_dir: webui_dir(),
         data_dir: data_dir.to_path_buf(),
@@ -524,11 +543,11 @@ pub async fn run_server(
     let result = loop {
         tokio::select! {
             result = &mut server => {
-                shutdown_bridge(&bridge_client, bridge_pid, &mut child).await;
+                shutdown_bridge(&backend, bridge_pid, &mut child).await;
                 break result.map_err(|e| RunError::Retryable(format!("HTTP 服务异常: {e}")));
             }
             Some(new_args) = restart_rx.recv() => {
-                shutdown_bridge(&bridge_client, bridge_pid, &mut child).await;
+                shutdown_bridge(&backend, bridge_pid, &mut child).await;
                 break Err(RunError::RestartWith(new_args));
             }
             status = child.wait() => {
@@ -539,12 +558,12 @@ pub async fn run_server(
             }
             _ = stop_rx.recv() => {
                 logfmt::info("看门狗", "收到停止指令，开始清理");
-                shutdown_bridge(&bridge_client, bridge_pid, &mut child).await;
+                shutdown_bridge(&backend, bridge_pid, &mut child).await;
                 break Ok(());
             }
             _ = &mut shutdown => {
                 logfmt::info("看门狗", "收到退出信号，开始清理");
-                shutdown_bridge(&bridge_client, bridge_pid, &mut child).await;
+                shutdown_bridge(&backend, bridge_pid, &mut child).await;
                 break Ok(());
             }
             Some(event) = helper_rx.recv() => match event {
@@ -557,7 +576,7 @@ pub async fn run_server(
                     helpers.terminate_vnc().await;
                     helpers.vnc_pid = None;
                     helpers.vnc_info.enabled = false;
-                    shutdown_bridge(&bridge_client, bridge_pid, &mut child).await;
+                    shutdown_bridge(&backend, bridge_pid, &mut child).await;
                     break Err(RunError::Retryable("Xvfb 已退出".into()));
                 }
                 HelperEvent::VncDead => {
@@ -577,11 +596,11 @@ pub async fn run_server(
 
 /// 停止引擎桥：先请求 Node 侧清理浏览器（launcher cleanup），再杀整个进程组回收残留。
 async fn shutdown_bridge(
-    bridge_client: &bridge::Bridge,
+    backend: &BackendRuntime,
     bridge_pid: u32,
     child: &mut tokio::process::Child,
 ) {
-    let _ = tokio::time::timeout(Duration::from_secs(5), bridge_client.shutdown()).await;
+    let _ = tokio::time::timeout(Duration::from_secs(5), backend.shutdown()).await;
     kill_tree(bridge_pid);
     let _ = child.wait().await;
 }
@@ -610,7 +629,7 @@ async fn shutdown_signal() {
 }
 
 /// 安装目录：包含 bridge/ 与 scripts/ 的目录。
-/// 优先 WEBAI2API_HOME；否则从可执行文件位置逐级向上找 bridge/bridge.mjs，
+/// 优先 WEBAI2API_HOME；否则从可执行文件位置逐级向上找浏览器桥，
 /// 这样开发布局（target/debug 向上两级）自然命中。
 fn install_dir() -> PathBuf {
     if let Ok(dir) = std::env::var("WEBAI2API_HOME") {
@@ -618,7 +637,9 @@ fn install_dir() -> PathBuf {
     }
     let mut dir = std::env::current_exe().unwrap_or_default();
     for _ in 0..6 {
-        if dir.join("bridge/bridge.mjs").is_file() {
+        if dir.join("bridge/browser-runtime.mjs").is_file()
+            || dir.join("bridge/bridge.mjs").is_file()
+        {
             return dir;
         }
         if !dir.pop() {
