@@ -453,7 +453,7 @@ export class BrowserRuntime {
             const req = route.request();
             const entry = { token, route, timer: null, settled: false };
             this.routes.set(token, entry);
-            const meta = { type: 'route', browserId: page.browserId, pageId, generation: page.generation, routeToken: token, request: { url: req.url(), method: req.method(), headers: req.headers(), resourceType: req.resourceType(), postData: req.postData() } };
+            const meta = { type: 'route', browserId: page.browserId, pageId, generation: page.generation, routeToken: token, url: req.url(), request: { url: req.url(), method: req.method(), headers: req.headers(), resourceType: req.resourceType(), postData: req.postData() } };
             this.#emit(meta);
             entry.timer = setTimeout(() => this.#settleRoute(entry, { action: 'continue' }).catch(() => {}), timeout);
         };

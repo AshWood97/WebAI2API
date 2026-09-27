@@ -172,6 +172,9 @@ test('route timeout defaults to continue and resolves opaque route token', async
     const { routeId } = await runtime.routeInstall({ pageId, pattern: '**/*', timeoutMs: 50 });
     const page = runtime.pages.get(pageId).page;
     const decision = await page.triggerRoute();
+    const routed = runtime.eventPoll({ afterSequence: 0 }).events.find(event => event.type === 'route');
+    assert.equal(routed.url, 'https://site.test/');
+    assert.equal(routed.request.method, 'GET');
     await new Promise(resolve => setTimeout(resolve, 70));
     assert.equal(decision.action, 'continue');
     assert.equal(runtime.routes.size, 1); // the installation handle remains until route.remove
