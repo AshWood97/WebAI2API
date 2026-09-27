@@ -42,8 +42,10 @@ export class BrowserRuntime {
         this.routes = new Map();
         this.responses = new Map();
         this.downloads = new Set();
+        this.starting = new Set();
         this.subscriptions = new Map();
         this.events = [];
+        this.droppedByPage = new Map();
         this.eventSeq = 0;
         this.droppedEvents = 0;
         this.server = null;
@@ -113,21 +115,30 @@ export class BrowserRuntime {
     async browserStart(params = {}) {
         if (this.closed) throw new Error('runtime is shutting down');
         const mod = await this.#launcher();
+        if (this.closed) throw new Error('runtime is shutting down');
         const config = params.config || {};
         const options = params.options || {};
-        const id = opaqueId();
-        const started = await mod.initBrowserBase(config, options);
-        if (!started?.context) throw new Error('launcher returned no browser context');
-        const record = { id, context: started.context, engine: started.engine || options.engine || config?.browser?.engine || 'camoufox', runtime: started.runtime || null, options, config, pages: new Set(), closed: false };
-        this.browsers.set(id, record);
-        record.context.on?.('page', page => this.#addPage(record, page));
-        record.context.on?.('close', () => {
-            record.closed = true;
-            for (const pageId of [...record.pages]) this.#forgetPage(pageId, 'browser-closed');
-            this.#emit({ type: 'browser.closed', browserId: id });
-        });
-        this.#emit({ type: 'browser.started', browserId: id, engine: record.engine });
-        return { browserId: id, engine: record.engine, runtime: record.runtime, pageIds: this.#rememberExistingPages(record) };
+        const launch = (async () => {
+            const started = await mod.initBrowserBase(config, options);
+            if (!started?.context) throw new Error('launcher returned no browser context');
+            if (this.closed) {
+                await started.context.close();
+                throw new Error('runtime shut down during browser startup');
+            }
+            const id = opaqueId();
+            const record = { id, context: started.context, engine: started.engine || options.engine || config?.browser?.engine || 'camoufox', runtime: started.runtime || null, options, config, pages: new Set(), closed: false };
+            this.browsers.set(id, record);
+            record.context.on?.('page', page => this.#addPage(record, page));
+            record.context.on?.('close', () => {
+                record.closed = true;
+                for (const pageId of [...record.pages]) this.#forgetPage(pageId, 'browser-closed');
+                this.#emit({ type: 'browser.closed', browserId: id });
+            });
+            this.#emit({ type: 'browser.started', browserId: id, engine: record.engine });
+            return { browserId: id, engine: record.engine, runtime: record.runtime, pageIds: this.#rememberExistingPages(record) };
+        })();
+        this.starting.add(launch);
+        try { return await launch; } finally { this.starting.delete(launch); }
     }
 
     #rememberExistingPages(browser) {
@@ -158,6 +169,7 @@ export class BrowserRuntime {
         for (const hook of page.hooks) { try { hook(); } catch {} }
         page.browser.pages.delete(pageId);
         this.pages.delete(pageId);
+        this.droppedByPage.delete(pageId);
         for (const [id, element] of this.elements) if (element.pageId === pageId) {
             this.elements.delete(id);
             Promise.resolve(element.handle.dispose?.()).catch(() => {});
@@ -404,12 +416,14 @@ export class BrowserRuntime {
         return { ok: this.subscriptions.delete(subscriptionId) };
     }
 
-    eventPoll({ afterSequence = 0, limit = 256 } = {}) {
+    eventPoll({ afterSequence = 0, limit = 256, pageId = null } = {}) {
         const first = this.events[0]?.sequence ?? this.eventSeq + 1;
         const count = Math.min(1024, Math.max(1, Number(limit) || 256));
         return {
-            events: this.events.filter(event => event.sequence > afterSequence).slice(0, count),
-            dropped: afterSequence < first - 1 ? first - afterSequence - 1 : 0,
+            events: this.events.filter(event => event.sequence > afterSequence && (!pageId || event.pageId === pageId)).slice(0, count),
+            dropped: pageId
+                ? (this.droppedByPage.get(pageId) > afterSequence ? 1 : 0)
+                : (afterSequence < first - 1 ? first - afterSequence - 1 : 0),
             latestSequence: this.eventSeq
         };
     }
@@ -511,6 +525,7 @@ export class BrowserRuntime {
     async shutdown() {
         if (this.closed) return { ok: true };
         this.closed = true;
+        await Promise.allSettled([...this.starting]);
         for (const entry of [...this.routes.values()]) {
             if (entry.token) await this.#settleRoute(entry, { action: 'continue' }).catch(() => {});
             else await entry.remove?.();
@@ -536,7 +551,11 @@ export class BrowserRuntime {
 
     #emit(event) {
         const envelope = { event: 'runtime', sequence: ++this.eventSeq, ...event };
-        if (this.events.length >= this.eventBufferLimit) { this.events.shift(); this.droppedEvents++; }
+        if (this.events.length >= this.eventBufferLimit) {
+            const dropped = this.events.shift();
+            this.droppedEvents++;
+            if (dropped?.pageId) this.droppedByPage.set(dropped.pageId, dropped.sequence);
+        }
         this.events.push(envelope);
         if (this.socket && !this.socket.destroyed) {
             for (const sub of this.subscriptions.values()) {
@@ -568,6 +587,7 @@ export class BrowserRuntime {
         if (this.socket && !this.socket.destroyed) { socket.end(); return; }
         this.socket = socket;
         socket.on('close', () => {
+            if (this.socket !== socket) return;
             // A disconnected Rust peer cannot resolve pending routes. Release
             // every intercepted request immediately using the safe default.
             for (const entry of [...this.routes.values()]) if (entry.token) this.#settleRoute(entry, { action: 'continue' }).catch(() => {});
@@ -583,19 +603,19 @@ export class BrowserRuntime {
             while ((index = buffer.indexOf('\n')) >= 0) {
                 const line = buffer.slice(0, index).trim(); buffer = buffer.slice(index + 1);
                 if (!line) continue;
-                if (Buffer.byteLength(line) > MAX_LINE_BYTES) { this.#reply(null, null, new Error('request frame too large')); continue; }
+                if (Buffer.byteLength(line) > MAX_LINE_BYTES) { this.#reply(socket, null, null, new Error('request frame too large')); continue; }
                 let req;
-                try { req = JSON.parse(line); } catch { this.#reply(null, null, new Error('invalid JSON')); continue; }
-                Promise.resolve(this.dispatch(req)).then(result => this.#reply(req.id ?? null, result), error => this.#reply(req.id ?? null, null, error));
+                try { req = JSON.parse(line); } catch { this.#reply(socket, null, null, new Error('invalid JSON')); continue; }
+                Promise.resolve(this.dispatch(req)).then(result => this.#reply(socket, req.id ?? null, result), error => this.#reply(socket, req.id ?? null, null, error));
             }
         });
         socket.on('close', () => { if (this.socket === socket) this.socket = null; });
     }
 
-    #reply(id, result, error) {
-        if (!this.socket || this.socket.destroyed) return;
+    #reply(socket, id, result, error) {
+        if (this.socket !== socket || socket.destroyed) return;
         const response = error ? { id, error: errorMessage(error) } : { id, result };
-        this.socket.write(`${JSON.stringify(response)}\n`);
+        socket.write(`${JSON.stringify(response)}\n`);
     }
 }
 

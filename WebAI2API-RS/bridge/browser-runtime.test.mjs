@@ -92,6 +92,61 @@ test('JSON-line socket frames fragmented and back-to-back requests', async t => 
     assert.deepEqual(lines[1].result, { ok: true, skipped: true });
 });
 
+test('reconnected client never receives a reply from a disconnected request', async t => {
+    const { runtime } = fixture();
+    const dir = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'browser-reconnect-'));
+    const sockPath = path.join(dir, 'rpc.sock');
+    const server = runtime.listen(sockPath);
+    await new Promise(resolve => server.once('listening', resolve));
+    const clients = [];
+    t.after(async () => {
+        for (const client of clients) client.destroy();
+        await runtime.shutdown();
+        await fs.promises.rm(dir, { recursive: true, force: true });
+    });
+    const pending = new Map();
+    runtime.dispatch = request => new Promise(resolve => pending.set(request.params.tag, resolve));
+    async function connect() {
+        const client = net.createConnection(sockPath);
+        clients.push(client);
+        const messages = [];
+        let buffer = '';
+        client.setEncoding('utf8');
+        client.on('data', chunk => {
+            buffer += chunk;
+            let end;
+            while ((end = buffer.indexOf('\n')) >= 0) {
+                messages.push(JSON.parse(buffer.slice(0, end)));
+                buffer = buffer.slice(end + 1);
+            }
+        });
+        await new Promise(resolve => client.once('connect', resolve));
+        for (let tries = 0; tries < 100 && messages.length === 0; tries++) {
+            await new Promise(resolve => setTimeout(resolve, 5));
+        }
+        assert.equal(messages[0]?.event, 'ready');
+        return { client, messages };
+    }
+    const first = await connect();
+    first.client.write(`${JSON.stringify({ id: 1, method: 'hold', params: { tag: 'old' } })}\n`);
+    await new Promise(resolve => setImmediate(resolve));
+    first.client.destroy();
+    await new Promise(resolve => first.client.once('close', resolve));
+    for (let tries = 0; tries < 100 && runtime.socket !== null; tries++) {
+        await new Promise(resolve => setTimeout(resolve, 5));
+    }
+    assert.equal(runtime.socket, null);
+    const second = await connect();
+    second.client.write(`${JSON.stringify({ id: 1, method: 'hold', params: { tag: 'new' } })}\n`);
+    await new Promise(resolve => setImmediate(resolve));
+    pending.get('old')({ tag: 'old' });
+    await new Promise(resolve => setTimeout(resolve, 20));
+    assert.equal(second.messages.length, 1);
+    pending.get('new')({ tag: 'new' });
+    await new Promise(resolve => setTimeout(resolve, 20));
+    assert.deepEqual(second.messages[1], { id: 1, result: { tag: 'new' } });
+});
+
 test('page.call preserves operation order and reports the failed index', async () => {
     const { runtime } = fixture();
     const { browserId } = await runtime.browserStart();
@@ -165,6 +220,24 @@ test('bounded event buffer reports events dropped before the requested cursor', 
     await runtime.shutdown();
 });
 
+test('page-scoped polling ignores unrelated page overflow but detects own loss', async () => {
+    const { runtime } = fixture({ eventBufferLimit: 16 });
+    const { browserId } = await runtime.browserStart();
+    const first = await runtime.pageCreate({ browserId });
+    const second = await runtime.pageCreate({ browserId });
+    const cursor = runtime.eventSeq;
+    const noisy = runtime.pages.get(second.pageId).page;
+    for (let i = 0; i < 20; i++) noisy.emit('console', { type: () => 'log', text: () => String(i) });
+    const quiet = runtime.pages.get(first.pageId).page;
+    quiet.emit('response', { url: () => 'https://site.test/answer', status: () => 200 });
+    const own = runtime.eventPoll({ afterSequence: cursor, pageId: first.pageId });
+    assert.equal(own.dropped, 0);
+    assert.equal(own.events.length, 1);
+    for (let i = 0; i < 20; i++) noisy.emit('console', { type: () => 'log', text: () => `later-${i}` });
+    assert.equal(runtime.eventPoll({ afterSequence: cursor, pageId: first.pageId }).dropped, 1);
+    await runtime.shutdown();
+});
+
 test('route timeout defaults to continue and resolves opaque route token', async () => {
     const { runtime } = fixture({ routeTimeoutMs: 50 });
     const { browserId } = await runtime.browserStart();
@@ -190,6 +263,23 @@ test('browser/page cleanup closes contexts and removes records', async () => {
     assert.equal(contexts[0].openPages.length, 1); // fake context retains its historical pages list
     assert.equal(runtime.pages.has(pageId), false);
     assert.equal(runtime.browsers.has(browserId), false);
+});
+
+test('shutdown waits for an in-flight browser launch and closes its late context', async () => {
+    let finishLaunch;
+    let closed = false;
+    const runtime = new BrowserRuntime({ launcher: {
+        initBrowserBase: () => new Promise(resolve => { finishLaunch = resolve; }),
+        cleanup: async () => {}
+    } });
+    const launch = runtime.browserStart({ config: { browser: { headless: true } } });
+    await new Promise(resolve => setImmediate(resolve));
+    const stopping = runtime.shutdown();
+    finishLaunch({ context: { close: async () => { closed = true; } }, engine: 'fake' });
+    await assert.rejects(launch, /shut down during browser startup/);
+    await stopping;
+    assert.equal(closed, true);
+    assert.equal(runtime.browsers.size, 0);
 });
 
 test('evaluate accepts fixed expression names only and runtime imports no legacy backend', async () => {

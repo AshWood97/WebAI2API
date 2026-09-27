@@ -251,7 +251,7 @@ async fn generate(
         .to_owned();
 
     let deadline = Instant::now() + Duration::from_secs(300);
-    let mut drafts_body = None;
+    let mut video_url = None;
     let mut task_completed = false;
     while Instant::now() < deadline && !task_completed {
         for event in page.poll_events(after).await? {
@@ -260,7 +260,8 @@ async fn generate(
                 continue;
             }
             if is_request(&event, "project_y/profile/drafts", "GET") {
-                drafts_body = Some(event_body(page, &event).await?);
+                let body = event_body(page, &event).await?;
+                video_url = video_url_from_drafts(&body, &task_id).map(str::to_owned);
             } else if is_request(&event, "nf/pending/v2", "GET") {
                 let body = event_body(page, &event).await?;
                 if !task_is_pending(&body, &task_id) {
@@ -280,19 +281,28 @@ async fn generate(
             true,
         ));
     }
-    let drafts = if let Some(body) = drafts_body {
-        body
-    } else {
-        let response = wait_response(page, &mut after, 60_000, |event| {
-            event.status == Some(200) && is_request(event, "project_y/profile/drafts", "GET")
-        })
-        .await?;
-        event_body(page, &response).await?
-    };
-    let video_url = video_url_from_drafts(&drafts, &task_id)
-        .ok_or_else(|| AdapterError::new("未找到匹配的视频任务或视频 URL"))?;
+    let refresh_deadline = Instant::now() + Duration::from_secs(60);
+    while video_url.is_none() && Instant::now() < refresh_deadline {
+        for event in page.poll_events(after).await? {
+            after = after.max(event.sequence);
+            if event.event_type == "response"
+                && event.status == Some(200)
+                && is_request(&event, "project_y/profile/drafts", "GET")
+            {
+                let body = event_body(page, &event).await?;
+                video_url = video_url_from_drafts(&body, &task_id).map(str::to_owned);
+                if video_url.is_some() {
+                    break;
+                }
+            }
+        }
+        if video_url.is_none() {
+            call(page, vec![json!({"op":"waitForTimeout","ms":200})]).await?;
+        }
+    }
+    let video_url = video_url.ok_or_else(|| AdapterError::new("未找到匹配的视频任务或视频 URL"))?;
     Ok(AdapterOutput::image(
-        download_video(page, video_url, request.wait_timeout_ms.max(1)).await?,
+        download_video(page, &video_url, request.wait_timeout_ms.max(1)).await?,
     ))
 }
 

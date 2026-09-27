@@ -237,6 +237,19 @@ impl BrowserRpc {
         .await
     }
 
+    pub async fn event_poll_page(
+        &self,
+        page_id: &str,
+        after_sequence: u64,
+        limit: Option<usize>,
+    ) -> Result<EventBatch, BridgeError> {
+        self.call_default(
+            "event.poll",
+            json!({"afterSequence": after_sequence, "limit": limit, "pageId": page_id}),
+        )
+        .await
+    }
+
     pub async fn route_install(
         &self,
         page_id: &str,

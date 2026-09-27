@@ -35,6 +35,23 @@ fn rpc_error(error: impl std::fmt::Display) -> AdapterError {
     AdapterError::new(error.to_string())
 }
 
+fn retryable_download_error(message: &str) -> bool {
+    let lower = message.to_ascii_lowercase();
+    lower.contains("http 5")
+        || [
+            "timeout",
+            "network",
+            "econnreset",
+            "econnrefused",
+            "etimedout",
+            "disconnected",
+            "tls",
+            "socket",
+        ]
+        .iter()
+        .any(|needle| lower.contains(needle))
+}
+
 impl PageClient for RpcPage {
     fn call<'a>(&'a self, operations: Vec<Value>) -> ClientFuture<'a, Vec<Value>> {
         Box::pin(async move {
@@ -84,7 +101,7 @@ impl PageClient for RpcPage {
         Box::pin(async move {
             let batch = self
                 .rpc
-                .event_poll(after_sequence, Some(1024))
+                .event_poll_page(&self.page_id, after_sequence, Some(1024))
                 .await
                 .map_err(rpc_error)?;
             if batch.dropped != 0 {
@@ -209,11 +226,24 @@ impl PageClient for RpcPage {
             let path = path
                 .to_str()
                 .ok_or_else(|| AdapterError::new("download output path is not UTF-8"))?;
-            let result = self
-                .rpc
-                .download_fetch(&self.page_id, url, path, headers, Some(timeout_ms))
-                .await
-                .map_err(rpc_error)?;
+            let mut result = None;
+            for attempt in 1..=3 {
+                match self
+                    .rpc
+                    .download_fetch(&self.page_id, url, path, headers.clone(), Some(timeout_ms))
+                    .await
+                {
+                    Ok(downloaded) => {
+                        result = Some(downloaded);
+                        break;
+                    }
+                    Err(error) if attempt < 3 && retryable_download_error(&error.to_string()) => {
+                        tokio::time::sleep(Duration::from_millis(1000 * attempt)).await;
+                    }
+                    Err(error) => return Err(rpc_error(error)),
+                }
+            }
+            let result = result.ok_or_else(|| AdapterError::new("download retries exhausted"))?;
             let content_type = result.headers.as_object().and_then(|headers| {
                 headers
                     .iter()
@@ -235,5 +265,19 @@ impl PageClient for RpcPage {
                 .map(|result| result.cookies)
                 .map_err(rpc_error)
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::retryable_download_error;
+
+    #[test]
+    fn download_retries_only_transient_failures() {
+        assert!(retryable_download_error("download failed with HTTP 503"));
+        assert!(retryable_download_error("socket disconnected"));
+        assert!(retryable_download_error("network timeout"));
+        assert!(!retryable_download_error("download failed with HTTP 404"));
+        assert!(!retryable_download_error("permission denied"));
     }
 }
