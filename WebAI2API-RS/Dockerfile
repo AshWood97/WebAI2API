@@ -2,7 +2,7 @@
 #   docker build -f WebAI2API-RS/Dockerfile .
 # 第一阶段编译 Rust 二进制，第二阶段用 Node 运行时承载引擎桥和浏览器内核。
 
-FROM rust:1.85-bookworm AS rust-build
+FROM rust:1.98-bookworm AS rust-build
 WORKDIR /src
 COPY WebAI2API-RS/Cargo.toml WebAI2API-RS/Cargo.lock ./
 COPY WebAI2API-RS/src ./src

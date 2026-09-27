@@ -70,7 +70,7 @@ fn save_as_jpeg(data_uri: &str, temp_dir: &Path) -> Result<PathBuf, String> {
     let name = format!(
         "img_{}_{}.jpg",
         chrono::Utc::now().timestamp_millis(),
-        &uuid_short()
+        uuid_short()
     );
     let path = temp_dir.join(name);
     std::fs::create_dir_all(temp_dir).ok();
