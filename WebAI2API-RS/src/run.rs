@@ -424,7 +424,7 @@ pub async fn run_server(
             )
             .await
             .map_err(|error| RunError::Retryable(error.to_string()))?;
-            if let Err(error) = rpc.preflight().await {
+            if let Err(error) = rpc.preflight_with_config(&config).await {
                 kill_tree(child.id().unwrap_or_default());
                 let _ = child.wait().await;
                 return Err(RunError::Fatal(format!("启动预检失败: {error}")));
