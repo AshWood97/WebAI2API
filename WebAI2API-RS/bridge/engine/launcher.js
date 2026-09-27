@@ -296,8 +296,17 @@ async function getPersistentFingerprint(filePath, targetMajor = null) {
             locales: ['en-US'],
             screen: { minWidth: 1280, maxWidth: 1366, minHeight: 720, maxHeight: 768 }
         };
-        const generator = new FingerprintGenerator(generatorOptions);
-        fingerprintData = generator.getFingerprint().fingerprint;
+        try {
+            fingerprintData = new FingerprintGenerator(generatorOptions).getFingerprint().fingerprint;
+        } catch (error) {
+            // The upstream fingerprint dataset may have no Linux Firefox sample
+            // inside this narrow screen range. Keep OS/browser constraints and
+            // let the generator choose a valid desktop screen.
+            logger.warn('浏览器', `限定屏幕尺寸的指纹不可用，改用同系统桌面指纹: ${error.message}`);
+            const relaxedOptions = { ...generatorOptions };
+            delete relaxedOptions.screen;
+            fingerprintData = new FingerprintGenerator(relaxedOptions).getFingerprint().fingerprint;
+        }
 
         // 清洗插件数据
         if (fingerprintData.pluginsData) {
