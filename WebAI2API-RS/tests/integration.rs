@@ -54,6 +54,58 @@ fn base_opts(cfg: &Path, data: &Path) -> StartOptions {
     }
 }
 
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn generic_browser_rpc_runs_rust_adapter_through_http() {
+    let _serial = SERIAL.lock().await;
+    let cfg = temp_dir("rust-runtime-cfg");
+    let data = temp_dir("rust-runtime-data");
+    let port = free_port();
+    write_config(
+        &data,
+        &format!(
+            "server: {{ port: {port}, auth: \"\" }}\nbackend:\n  pool:\n    instances:\n      - {{ name: main, workers: [{{ name: rust-test, type: test }}] }}\n"
+        ),
+    );
+    let mut opts = base_opts(&cfg, &data);
+    opts.bridge_script = None;
+    opts.extra_envs = vec![(
+        "WEBAI2API_BROWSER_RUNTIME_SCRIPT".into(),
+        Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("bridge/mock-browser-runtime.mjs")
+            .to_string_lossy()
+            .into_owned(),
+    )];
+    let handle = run::supervise(opts).await;
+    wait_ready(port).await;
+
+    let (status, models) = get(port, "/v1/models").await;
+    assert_eq!(status, 200, "{models}");
+    assert!(
+        models["data"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|model| model["id"] == "ip"),
+        "{models}"
+    );
+    let (status, body) = post(
+        port,
+        "/v1/chat/completions",
+        serde_json::json!({"model":"ip", "messages":[{"role":"user", "content":"check"}]}),
+    )
+    .await;
+    assert_eq!(status, 200, "{body}");
+    assert_eq!(
+        body.pointer("/choices/0/message/content")
+            .and_then(Value::as_str),
+        Some("203.0.113.42")
+    );
+
+    handle.shutdown().await;
+    let _ = std::fs::remove_dir_all(&cfg);
+    let _ = std::fs::remove_dir_all(&data);
+}
+
 fn worker_tag(port: u16) -> String {
     format!("i{}", port % 1000)
 }

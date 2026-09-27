@@ -412,14 +412,20 @@ pub async fn run_server(
                 safe_mode,
             ))
         } else {
-            let bridge_script = install_dir().join("bridge/browser-runtime.mjs");
+            let bridge_script = opts
+                .extra_envs
+                .iter()
+                .find(|(key, _)| key == "WEBAI2API_BROWSER_RUNTIME_SCRIPT")
+                .map(|(_, value)| PathBuf::from(value))
+                .or_else(|| std::env::var_os("WEBAI2API_BROWSER_RUNTIME_SCRIPT").map(PathBuf::from))
+                .unwrap_or_else(|| install_dir().join("bridge/browser-runtime.mjs"));
             let (mut child, rpc) = runtime::spawn_browser_rpc(
                 &node,
                 &bridge_script,
                 root,
                 &sock,
                 &temp_dir,
-                opts.login.is_some(),
+                opts.login.as_deref(),
                 &opts.extra_envs,
             )
             .await
@@ -429,7 +435,7 @@ pub async fn run_server(
                 let _ = child.wait().await;
                 return Err(RunError::Fatal(format!("启动预检失败: {error}")));
             }
-            match RustRuntime::initialize(rpc.clone(), config.clone()).await {
+            match RustRuntime::initialize(rpc.clone(), config.clone(), temp_dir.clone()).await {
                 Ok(runtime) => {
                     let snapshot = runtime.worker_snapshot();
                     Ok((
@@ -442,7 +448,7 @@ pub async fn run_server(
                 }
                 Err(error) => {
                     logfmt::error("服务器", &format!("工作池初始化失败: {error}"));
-                    let runtime = RustRuntime::empty(rpc, config.clone());
+                    let runtime = RustRuntime::empty(rpc, config.clone(), temp_dir.clone());
                     Ok((
                         child,
                         BackendRuntime::Rust(Arc::new(runtime)),

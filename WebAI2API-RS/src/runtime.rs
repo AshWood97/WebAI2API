@@ -14,12 +14,21 @@ use crate::scheduler::{
 use serde_json::{json, Value};
 use std::collections::HashMap;
 use std::future::Future;
+use std::path::PathBuf;
 use std::pin::Pin;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 
 struct RuntimeWorker {
     spec: WorkerSpec,
-    page: Arc<dyn PageClient>,
+    page: tokio::sync::RwLock<Arc<dyn PageClient>>,
+    page_id: tokio::sync::RwLock<String>,
+    browser_id: tokio::sync::RwLock<String>,
+    instance_name: String,
+    engine: String,
+    user_data_dir: String,
+    browser_runtime: Option<Value>,
+    execution: tokio::sync::Mutex<()>,
     adapters: HashMap<String, Value>,
 }
 
@@ -29,7 +38,8 @@ pub struct RustRuntime {
     config: Value,
     workers: Vec<RuntimeWorker>,
     scheduler: Scheduler,
-    browser_ids: Vec<String>,
+    browser_ids: tokio::sync::RwLock<Vec<String>>,
+    temp_dir: PathBuf,
 }
 
 /// Common generation/model facade selected by startup. A user supplied bridge
@@ -105,9 +115,7 @@ impl BackendRuntime {
     pub async fn restart_browser(&self) -> Result<Value, crate::errors::BridgeError> {
         match self {
             Self::Legacy(bridge) => bridge.restart_browser().await,
-            Self::Rust(_) => Err(crate::errors::BridgeError::Remote(
-                "browser restart is not yet wired for the Rust runtime".into(),
-            )),
+            Self::Rust(runtime) => runtime.restart_browser().await,
         }
     }
 
@@ -129,9 +137,7 @@ impl BackendRuntime {
     ) -> Result<Value, crate::errors::BridgeError> {
         match self {
             Self::Legacy(bridge) => bridge.download_via_context(url, retries).await,
-            Self::Rust(_) => Err(crate::errors::BridgeError::Remote(
-                "context download is not yet wired for the Rust runtime".into(),
-            )),
+            Self::Rust(runtime) => runtime.download_via_context(url, retries).await,
         }
     }
 }
@@ -143,7 +149,7 @@ pub async fn spawn_browser_rpc(
     src_root: &std::path::Path,
     socket: &std::path::Path,
     temp_dir: &std::path::Path,
-    login: bool,
+    login: Option<&str>,
     extra_envs: &[(String, String)],
 ) -> Result<(tokio::process::Child, BrowserRpc), crate::errors::BridgeError> {
     if socket.exists() {
@@ -174,13 +180,20 @@ pub async fn spawn_browser_rpc(
         .arg(script)
         .env("WEBAI2API_SRC_ROOT", src_root)
         .env("WEBAI2API_SOCK", socket)
-        .env("WEBAI2API_LOGIN", if login { "1" } else { "" })
+        .env("WEBAI2API_LOGIN", login.unwrap_or(""))
         .env("WEBAI2API_TEMP_DIR", temp_dir)
         .env("CAMOUFOX_INSTALL_DIR", src_root.join("camoufox"))
         .current_dir(&cwd)
         .stdout(std::process::Stdio::inherit())
         .stderr(std::process::Stdio::inherit())
         .kill_on_drop(true);
+    if let Some(login_worker) = login {
+        command.arg(if login_worker.is_empty() {
+            "-login".to_owned()
+        } else {
+            format!("-login={login_worker}")
+        });
+    }
     for (name, value) in extra_envs {
         command.env(name, value);
     }
@@ -197,6 +210,7 @@ pub async fn spawn_browser_rpc(
         .spawn()
         .map_err(|source| crate::errors::BridgeError::Spawn { source })?;
     let bridge_pid = child.id().unwrap_or_default();
+    let mut process_group_guard = BrowserProcessGroupGuard(bridge_pid);
     for _ in 0..100 {
         if socket.exists() {
             break;
@@ -232,22 +246,38 @@ pub async fn spawn_browser_rpc(
             return Err(crate::errors::BridgeError::ReadyTimeout);
         }
     }
+    process_group_guard.0 = 0;
     Ok((child, rpc))
 }
 
+struct BrowserProcessGroupGuard(u32);
+
+impl Drop for BrowserProcessGroupGuard {
+    fn drop(&mut self) {
+        if self.0 != 0 {
+            crate::run::kill_tree(self.0);
+        }
+    }
+}
+
 impl RustRuntime {
-    pub fn empty(rpc: BrowserRpc, config: Value) -> Self {
+    pub fn empty(rpc: BrowserRpc, config: Value, temp_dir: PathBuf) -> Self {
         Self {
             rpc,
             config,
             workers: Vec::new(),
             scheduler: Scheduler::new(Strategy::LeastBusy, FailoverConfig::default()),
-            browser_ids: Vec::new(),
+            browser_ids: tokio::sync::RwLock::new(Vec::new()),
+            temp_dir,
         }
     }
     /// Start configured browser instances and materialize the worker capability
     /// snapshot from the embedded Rust catalog.
-    pub async fn initialize(rpc: BrowserRpc, config: Value) -> Result<Self, String> {
+    pub async fn initialize(
+        rpc: BrowserRpc,
+        config: Value,
+        temp_dir: PathBuf,
+    ) -> Result<Self, String> {
         let workers_config = config
             .pointer("/backend/pool/workers")
             .and_then(Value::as_array)
@@ -299,8 +329,11 @@ impl RustRuntime {
                     .map_err(|error| error.to_string())?
                     .page_id
             };
-            let page: Arc<dyn PageClient> =
-                Arc::new(RpcPage::new(rpc.clone(), browser.browser_id, page_id));
+            let page: Arc<dyn PageClient> = Arc::new(RpcPage::new(
+                rpc.clone(),
+                browser.browser_id.clone(),
+                page_id.clone(),
+            ));
             let adapter_types = if worker_type == "merge" {
                 merge_types.clone()
             } else {
@@ -336,15 +369,23 @@ impl RustRuntime {
                 ));
                 adapter_configs.insert(
                     adapter_type.clone(),
-                    config
-                        .pointer(&format!("/backend/adapter/{adapter_type}"))
-                        .cloned()
-                        .unwrap_or_else(|| json!({})),
+                    adapter_request_config(&config, &adapter_type),
                 );
             }
             workers.push(RuntimeWorker {
                 spec: WorkerSpec::new(worker_name, worker_type, merge_types, capabilities),
-                page,
+                page: tokio::sync::RwLock::new(page),
+                page_id: tokio::sync::RwLock::new(page_id),
+                browser_id: tokio::sync::RwLock::new(browser.browser_id.clone()),
+                instance_name: worker_cfg
+                    .get("instanceName")
+                    .and_then(Value::as_str)
+                    .unwrap_or(worker_name)
+                    .to_owned(),
+                engine: engine.to_owned(),
+                user_data_dir: user_data_dir.to_owned(),
+                browser_runtime: browser.runtime.clone(),
+                execution: tokio::sync::Mutex::new(()),
                 adapters: adapter_configs,
             });
         }
@@ -374,27 +415,67 @@ impl RustRuntime {
             config,
             workers,
             scheduler,
-            browser_ids,
+            browser_ids: tokio::sync::RwLock::new(browser_ids),
+            temp_dir,
         })
     }
 
     pub fn worker_snapshot(&self) -> Value {
         json!({"workers": self.workers.iter().map(|worker| json!({
             "name": worker.spec.name,
+            "instance": worker.instance_name,
             "type": worker.spec.worker_type,
-            "busy": worker.spec.busy_count(),
+            "adapter": worker.spec.worker_type,
+            "engine": worker.engine,
+            "userDataDir": std::path::Path::new(&worker.user_data_dir).file_name().and_then(|v| v.to_str()).unwrap_or(&worker.user_data_dir),
+            "busy": worker.spec.busy_count() > 0,
+            "busyCount": worker.spec.busy_count(),
+            "pageReady": true,
+            "authReady": true,
+            "mergeTypes": worker.spec.merge_types,
+            "stopped": false,
+            "runtime": worker.browser_runtime.as_ref().map(sanitize_runtime),
         })).collect::<Vec<_>>()})
     }
 
     pub fn models(&self) -> Value {
-        let models = self.scheduler.models(
-            &self
-                .workers
-                .iter()
-                .map(|worker| worker.spec.clone())
-                .collect::<Vec<_>>(),
-        );
-        json!({"object":"list", "data": models})
+        let specs = self
+            .workers
+            .iter()
+            .map(|worker| worker.spec.clone())
+            .collect::<Vec<_>>();
+        let listed = self.scheduler.models(&specs);
+        let mut data = Vec::with_capacity(listed.len());
+        for model in listed {
+            let (adapter_type, source_id) =
+                if let Some((adapter, source)) = model.id.split_once('/') {
+                    (adapter, source)
+                } else {
+                    let Some(adapter) = self
+                        .workers
+                        .iter()
+                        .flat_map(|worker| worker.spec.capabilities.iter())
+                        .find(|capability| capability.models.iter().any(|item| item.id == model.id))
+                        .map(|capability| capability.adapter_type.as_str())
+                    else {
+                        continue;
+                    };
+                    (adapter, model.id.as_str())
+                };
+            let Some(source) = catalog::models_for_adapter(adapter_type, &self.config)["data"]
+                .as_array()
+                .and_then(|models| models.iter().find(|entry| entry["id"] == source_id))
+                .cloned()
+            else {
+                continue;
+            };
+            let mut source = source;
+            source["id"] = Value::String(model.id);
+            source["owned_by"] = Value::String(model.owned_by);
+            source["created"] = Value::from(chrono::Utc::now().timestamp());
+            data.push(source);
+        }
+        json!({"object":"list", "data": data})
     }
 
     pub fn model_info(&self, model_id: &str) -> Value {
@@ -411,10 +492,6 @@ impl RustRuntime {
 
     pub fn adapters(&self) -> Value {
         json!(catalog::list_adapters(&self.config))
-    }
-
-    pub fn browser_ids(&self) -> &[String] {
-        &self.browser_ids
     }
 
     pub async fn generate(
@@ -485,9 +562,94 @@ impl RustRuntime {
     }
 
     pub async fn shutdown(&self) {
-        for id in &self.browser_ids {
+        for id in self.browser_ids.read().await.iter() {
             let _ = self.rpc.browser_close(id).await;
         }
+        let _ = self.rpc.shutdown().await;
+    }
+
+    async fn restart_browser(&self) -> Result<Value, crate::errors::BridgeError> {
+        let old_ids = self.browser_ids.read().await.clone();
+        let mut replacement_ids = old_ids.clone();
+        for (index, old_id) in old_ids.iter().enumerate() {
+            let restarted = self.rpc.browser_restart(old_id).await?;
+            let browser = restarted.started;
+            let new_id = browser.browser_id.clone();
+            let mut pages = browser.page_ids.into_iter();
+            for worker in &self.workers {
+                if *worker.browser_id.read().await != *old_id {
+                    continue;
+                }
+                let page_id = if let Some(page_id) = pages.next() {
+                    page_id
+                } else {
+                    self.rpc.page_create(&new_id, None, None).await?.page_id
+                };
+                *worker.page.write().await = Arc::new(RpcPage::new(
+                    self.rpc.clone(),
+                    new_id.clone(),
+                    page_id.clone(),
+                ));
+                *worker.page_id.write().await = page_id;
+                *worker.browser_id.write().await = new_id.clone();
+            }
+            replacement_ids[index] = new_id;
+        }
+        *self.browser_ids.write().await = replacement_ids;
+        Ok(json!({
+            "browserStopped": false,
+            "workers": self.worker_snapshot()["workers"].clone(),
+            "result": {"success": true, "message": "浏览器已重启"}
+        }))
+    }
+
+    async fn download_via_context(
+        &self,
+        url: &str,
+        retries: u64,
+    ) -> Result<Value, crate::errors::BridgeError> {
+        static NEXT_DOWNLOAD: AtomicU64 = AtomicU64::new(1);
+        let worker = self.workers.first().ok_or_else(|| {
+            crate::errors::BridgeError::Remote("browser worker is unavailable".into())
+        })?;
+        let page_id = worker.page_id.read().await.clone();
+        std::fs::create_dir_all(&self.temp_dir)
+            .map_err(|source| crate::errors::BridgeError::Spawn { source })?;
+        let mut last_error = None;
+        for _ in 0..retries.max(1) {
+            let output = self.temp_dir.join(format!(
+                "retry-media-{}-{}.bin",
+                std::process::id(),
+                NEXT_DOWNLOAD.fetch_add(1, Ordering::Relaxed)
+            ));
+            match self
+                .rpc
+                .download_fetch(
+                    &page_id,
+                    url,
+                    output.to_string_lossy().as_ref(),
+                    json!({}),
+                    Some(120_000),
+                )
+                .await
+            {
+                Ok(result) => {
+                    let mime = result
+                        .headers
+                        .as_object()
+                        .and_then(|headers| {
+                            headers
+                                .iter()
+                                .find(|(key, _)| key.eq_ignore_ascii_case("content-type"))
+                                .and_then(|(_, value)| value.as_str())
+                        })
+                        .unwrap_or("application/octet-stream");
+                    return Ok(json!({"path": result.path, "mime": mime, "bytes": result.bytes}));
+                }
+                Err(error) => last_error = Some(error.to_string()),
+            }
+        }
+        Ok(json!({"error": last_error.unwrap_or_else(|| "download failed".into())}))
     }
 
     async fn cookies(
@@ -495,10 +657,14 @@ impl RustRuntime {
         instance: Option<&str>,
         domain: Option<&str>,
     ) -> Result<Value, crate::errors::BridgeError> {
-        let _ = instance;
-        let browser_id = self
-            .browser_ids
-            .first()
+        let mut browser_id = None;
+        for worker in &self.workers {
+            if instance.is_none_or(|name| worker.instance_name == name) {
+                browser_id = Some(worker.browser_id.read().await.clone());
+                break;
+            }
+        }
+        let browser_id = browser_id
             .ok_or_else(|| crate::errors::BridgeError::Remote("browser is unavailable".into()))?;
         let urls = domain
             .map(|value| {
@@ -510,7 +676,7 @@ impl RustRuntime {
             })
             .unwrap_or_default();
         self.rpc
-            .cookies_get(browser_id, urls)
+            .cookies_get(&browser_id, urls)
             .await
             .map(|result| json!({"cookies": result.cookies}))
     }
@@ -546,8 +712,10 @@ impl AdapterExecutor for RuntimeExecutor<'_> {
                 .unwrap_or(Value::Null);
             let adapter = adapter_for(adapter_type)
                 .ok_or_else(|| format!("Rust adapter is not registered: {adapter_type}"))?;
+            let _execution = worker.execution.lock().await;
+            let page = worker.page.read().await;
             let output = adapter
-                .generate(worker.page.as_ref(), &request)
+                .generate(page.as_ref(), &request)
                 .await
                 .map_err(|error| error.to_string())?;
             if let Some(error) = output.error {
@@ -604,4 +772,77 @@ fn string_array(value: Option<&Value>) -> Vec<String> {
         .filter_map(Value::as_str)
         .map(str::to_owned)
         .collect()
+}
+
+fn adapter_request_config(config: &Value, adapter_type: &str) -> Value {
+    let mut scoped = config
+        .pointer(&format!("/backend/adapter/{adapter_type}"))
+        .cloned()
+        .filter(Value::is_object)
+        .unwrap_or_else(|| json!({}));
+    if let Some(object) = scoped.as_object_mut() {
+        let failover = config
+            .pointer("/backend/pool/failover")
+            .cloned()
+            .unwrap_or_else(|| json!({}));
+        object.insert("failover".into(), failover.clone());
+        for key in ["imgDlRetry", "imgDlRetryMaxRetries"] {
+            if let Some(value) = failover.get(key) {
+                object.insert(key.into(), value.clone());
+            }
+        }
+    }
+    scoped
+}
+
+fn sanitize_runtime(value: &Value) -> Value {
+    match value {
+        Value::Object(source) => {
+            let mut result = source.clone();
+            for key in ["proxyPassword", "proxyUsername", "__meta"] {
+                result.remove(key);
+            }
+            for key in ["binaryPath", "userDataDir"] {
+                if let Some(path) = result.get(key).and_then(Value::as_str) {
+                    result.insert(
+                        key.to_owned(),
+                        Value::String(
+                            std::path::Path::new(path)
+                                .file_name()
+                                .and_then(|name| name.to_str())
+                                .unwrap_or(path)
+                                .to_owned(),
+                        ),
+                    );
+                }
+            }
+            for item in result.values_mut() {
+                *item = sanitize_runtime(item);
+            }
+            Value::Object(result)
+        }
+        Value::Array(items) => Value::Array(items.iter().map(sanitize_runtime).collect()),
+        other => other.clone(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::adapter_request_config;
+    use serde_json::json;
+
+    #[test]
+    fn adapter_config_keeps_site_options_and_includes_pool_failover() {
+        let config = json!({
+            "backend": {
+                "adapter": {"lmarena": {"returnUrl": true}},
+                "pool": {"failover": {"imgDlRetry": true, "imgDlRetryMaxRetries": 4, "maxRetries": 2}}
+            }
+        });
+        let scoped = adapter_request_config(&config, "lmarena");
+        assert_eq!(scoped["returnUrl"], true);
+        assert_eq!(scoped["imgDlRetry"], true);
+        assert_eq!(scoped["imgDlRetryMaxRetries"], 4);
+        assert_eq!(scoped["failover"]["maxRetries"], 2);
+    }
 }
