@@ -342,6 +342,23 @@ const isInitializing = ref(true);
 // 后端连接检测
 let connectionCheckInterval = null;
 let disconnectModalShown = false;
+let appUnmounted = false;
+
+const checkScreenSize = () => {
+  isMobile.value = window.innerWidth <= 768;
+  if (isMobile.value) {
+    collapsed.value = true;
+  }
+};
+
+onUnmounted(() => {
+  appUnmounted = true;
+  window.removeEventListener('resize', checkScreenSize);
+  if (connectionCheckInterval) {
+    clearInterval(connectionCheckInterval);
+    connectionCheckInterval = null;
+  }
+});
 
 async function checkConnection() {
   try {
@@ -356,7 +373,7 @@ async function checkConnection() {
       window.location.reload();
     }
   } catch (e) {
-    if (!disconnectModalShown && !isInitializing.value) {
+    if (!appUnmounted && !disconnectModalShown && !isInitializing.value) {
       disconnectModalShown = true;
       Modal.warning({
         title: '后端连接断开',
@@ -371,12 +388,6 @@ async function checkConnection() {
 // 挂载时检查身份验证
 onMounted(async () => {
   // 响应式侧边栏
-  const checkScreenSize = () => {
-    isMobile.value = window.innerWidth <= 768;
-    if (isMobile.value) {
-      collapsed.value = true;
-    }
-  };
   checkScreenSize();
   window.addEventListener('resize', checkScreenSize);
 
@@ -396,15 +407,9 @@ onMounted(async () => {
   }
 
   // 启动后端连接检测（每 5 秒检测一次）
-  connectionCheckInterval = setInterval(checkConnection, 5000);
-
-  // 清理监听器
-  onUnmounted(() => {
-    window.removeEventListener('resize', checkScreenSize);
-    if (connectionCheckInterval) {
-      clearInterval(connectionCheckInterval);
-    }
-  });
+  if (!appUnmounted) {
+    connectionCheckInterval = setInterval(checkConnection, 5000);
+  }
 });
 </script>
 

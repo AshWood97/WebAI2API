@@ -1,9 +1,11 @@
 <script setup>
-import { onMounted, reactive } from 'vue';
+import { onMounted, reactive, ref } from 'vue';
 import { useSettingsStore } from '@/stores/settings';
 import { Modal, message } from 'ant-design-vue';
 
 const settingsStore = useSettingsStore();
+const authTokenPendingRestart = ref(false);
+const activeAuthToken = ref('');
 
 // 表单数据
 const formData = reactive({
@@ -18,12 +20,47 @@ const formData = reactive({
 
 onMounted(async () => {
     await settingsStore.fetchServerConfig();
-    Object.assign(formData, settingsStore.serverConfig);
+    const { authTokenPendingRestart: pendingRestart, ...serverConfig } = settingsStore.serverConfig || {};
+    Object.assign(formData, serverConfig);
+    activeAuthToken.value = serverConfig.authToken || '';
+    authTokenPendingRestart.value = pendingRestart === true;
 });
 
 // 实际保存逻辑
 const doSave = async () => {
-    await settingsStore.saveServerConfig(formData);
+    const config = { ...formData };
+    // GET intentionally returns only the active token. Preserve a different
+    // pending token when saving unrelated server settings after page reload.
+    if (authTokenPendingRestart.value && config.authToken === activeAuthToken.value) {
+        delete config.authToken;
+    }
+    const saved = await settingsStore.saveServerConfig(config);
+    if (saved) {
+        authTokenPendingRestart.value = settingsStore.serverConfig?.authTokenPendingRestart === true;
+    }
+};
+
+// 显式将当前生效的 Token 写回配置，撤销尚未重启生效的鉴权变更。
+const applyCancelPendingAuthToken = async () => {
+    const saved = await settingsStore.saveServerConfig({ authToken: activeAuthToken.value });
+    if (saved) {
+        formData.authToken = activeAuthToken.value;
+        authTokenPendingRestart.value = settingsStore.serverConfig?.authTokenPendingRestart === true;
+    }
+};
+const cancelPendingAuthToken = () => {
+    if (activeAuthToken.value) {
+        void applyCancelPendingAuthToken();
+        return;
+    }
+    Modal.confirm({
+        title: '保持鉴权关闭？',
+        content: '撤销待生效 Token 后，重启后 API 和 WebUI 仍无需认证即可访问。请勿在公网环境中使用此配置。',
+        okText: '确认撤销',
+        okType: 'danger',
+        cancelText: '保留新 Token',
+        onOk: applyCancelPendingAuthToken
+    });
 };
 
 // 保存设置 (带校验和确认弹窗)
@@ -34,15 +71,17 @@ const handleSave = async () => {
         return;
     }
 
-    // Token 留空时弹出确认框
-    if (!formData.authToken) {
+    // 待生效变更期间若表单仍显示空的当前 Token，保存其他字段不会改写鉴权。
+    const writesEmptyAuthToken = !formData.authToken &&
+        !(authTokenPendingRestart.value && formData.authToken === activeAuthToken.value);
+    if (writesEmptyAuthToken) {
         Modal.confirm({
             title: '安全警告',
             content: '您正在将鉴权 Token 留空，这意味着 API 和 WebUI 将无需认证即可访问。请勿在公网环境中使用此配置！确定要继续吗？',
             okText: '确定留空',
             okType: 'danger',
             cancelText: '取消',
-            onOk: doSave
+            onOk: () => doSave()
         });
         return;
     }
@@ -55,6 +94,13 @@ const handleSave = async () => {
 <template>
     <a-layout style="background: transparent;">
         <a-card title="服务器设置" :bordered="false" style="width: 100%;">
+            <a-alert v-if="authTokenPendingRestart" type="warning" show-icon
+                message="鉴权 Token 已有新配置待生效"
+                description="当前服务仍使用已加载的 Token；新 Token 将在重启后启用。出于安全考虑，待生效的 Token 不会再次显示。"
+                style="margin-bottom: 16px;" />
+            <div v-if="authTokenPendingRestart" style="margin: -8px 0 16px;">
+                <a-button size="small" @click="cancelPendingAuthToken">撤销待生效 Token 变更</a-button>
+            </div>
             <!-- 4宫格表单布局 -->
             <a-row :gutter="[16, 16]">
                 <!-- 监听端口 -->

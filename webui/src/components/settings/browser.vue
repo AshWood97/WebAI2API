@@ -1,7 +1,6 @@
 <script setup>
 import { onMounted, reactive } from 'vue';
 import { useSettingsStore } from '@/stores/settings';
-import { message } from 'ant-design-vue';
 
 const settingsStore = useSettingsStore();
 
@@ -162,7 +161,6 @@ const handleSave = async () => {
         }
     };
     await settingsStore.saveBrowserConfig(config);
-    message.success('浏览器配置已保存（引擎切换必须重启服务后生效）');
 };
 </script>
 
@@ -171,7 +169,7 @@ const handleSave = async () => {
         <a-card title="基础" :bordered="false" class="sec">
             <a-form layout="vertical">
                 <a-row :gutter="16">
-                    <a-col :span="8">
+                    <a-col :xs="24" :sm="12" :md="8">
                         <a-form-item label="全局浏览器基座 engine">
                             <a-select v-model:value="formData.engine">
                                 <a-select-option value="camoufox">camoufox（默认 / Firefox）</a-select-option>
@@ -179,24 +177,24 @@ const handleSave = async () => {
                             </a-select>
                         </a-form-item>
                     </a-col>
-                    <a-col :span="8">
+                    <a-col :xs="24" :sm="12" :md="8">
                         <a-form-item label="Camoufox 可执行文件路径（留空使用默认）">
                             <a-input v-model:value="formData.path" placeholder="/path/to/camoufox" />
                         </a-form-item>
                     </a-col>
-                    <a-col :span="4">
+                    <a-col :xs="24" :sm="12" :md="4">
                         <a-form-item label="无头模式">
                             <a-switch v-model:checked="formData.headless" />
                         </a-form-item>
                     </a-col>
-                    <a-col :span="4">
+                    <a-col :xs="24" :sm="12" :md="4">
                         <a-form-item label="站点隔离 (fission)">
                             <a-switch v-model:checked="formData.fission" />
                         </a-form-item>
                     </a-col>
                 </a-row>
                 <a-row :gutter="16">
-                    <a-col :span="8">
+                    <a-col :xs="24" :sm="12" :md="8">
                         <a-form-item label="拟人鼠标轨迹">
                             <a-select v-model:value="formData.humanizeCursor">
                                 <a-select-option :value="'camou'">Camoufox 内核（推荐）</a-select-option>
@@ -205,13 +203,13 @@ const handleSave = async () => {
                             </a-select>
                         </a-form-item>
                     </a-col>
-                    <a-col :span="8">
+                    <a-col :xs="24" :sm="12" :md="8">
                         <a-form-item label="Firefox 主版本 spoof（空=跟随已安装）">
                             <a-input-number v-model:value="formData.ffVersion" :min="100" :max="200" style="width:100%"
                                 placeholder="例如 152" />
                         </a-form-item>
                     </a-col>
-                    <a-col :span="8">
+                    <a-col :xs="24" :sm="12" :md="8">
                         <a-form-item label="Locale（空=跟指纹）">
                             <a-input v-model:value="formData.camoufox.locale" placeholder="zh-CN / en-US" />
                         </a-form-item>
@@ -223,35 +221,35 @@ const handleSave = async () => {
         <a-card title="Camoufox FF152 能力" :bordered="false" class="sec">
             <a-form layout="vertical">
                 <a-row :gutter="16">
-                    <a-col :span="8">
+                    <a-col :xs="24" :sm="12" :md="8">
                         <a-form-item label="main_world_eval (mw:)">
                             <a-switch v-model:checked="formData.camoufox.mainWorldEval" />
                         </a-form-item>
                     </a-col>
-                    <a-col :span="8">
+                    <a-col :xs="24" :sm="12" :md="8">
                         <a-form-item label="启用页面缓存">
                             <a-switch v-model:checked="formData.camoufox.enableCache" />
                         </a-form-item>
                     </a-col>
-                    <a-col :span="8">
+                    <a-col :xs="24" :sm="12" :md="8">
                         <a-form-item label="禁用瞬时动画">
                             <a-switch v-model:checked="formData.camoufox.disableInstantAnimations" />
                         </a-form-item>
                     </a-col>
                 </a-row>
                 <a-row :gutter="16">
-                    <a-col :span="8">
+                    <a-col :xs="24" :sm="12" :md="8">
                         <a-form-item label="拟人轨迹最大时长（秒）">
                             <a-input-number v-model:value="formData.camoufox.humanizeMaxTime" :min="0.3" :max="5"
                                 :step="0.1" style="width:100%" />
                         </a-form-item>
                     </a-col>
-                    <a-col :span="8">
+                    <a-col :xs="24" :sm="12" :md="8">
                         <a-form-item label="阻断 WebRTC">
                             <a-switch v-model:checked="formData.camoufox.blockWebRtc" />
                         </a-form-item>
                     </a-col>
-                    <a-col :span="8">
+                    <a-col :xs="24" :sm="12" :md="8">
                         <a-form-item label="GeoIP 伪造">
                             <a-switch v-model:checked="formData.camoufox.geoip" />
                         </a-form-item>
@@ -269,12 +267,12 @@ const handleSave = async () => {
                 description="Clearcote 官方支持 Windows x64 / Linux x64；macOS 仍在 roadmap。profile 使用 data/clearcoteUserData*，与 Camoufox 目录隔离。切换 engine 需重启服务。免费 GitHub 构建默认同时仅 1 个 Clearcote 浏览器。容器内如需 --no-sandbox，请使用 sandbox 开关（args 禁止手写 --no-sandbox）。" />
             <a-form layout="vertical">
                 <a-row :gutter="16">
-                    <a-col :span="8">
+                    <a-col :xs="24" :sm="12" :md="8">
                         <a-form-item label="Clearcote 可执行文件（空=SDK 校验缓存）">
                             <a-input v-model:value="formData.clearcote.path" placeholder="留空使用 SDK 解析" />
                         </a-form-item>
                     </a-col>
-                    <a-col :span="8">
+                    <a-col :xs="24" :sm="12" :md="8">
                         <a-form-item label="指纹 platform">
                             <a-select v-model:value="formData.clearcote.platform">
                                 <a-select-option value="auto">auto（按宿主机）</a-select-option>
@@ -283,7 +281,7 @@ const handleSave = async () => {
                             </a-select>
                         </a-form-item>
                     </a-col>
-                    <a-col :span="8">
+                    <a-col :xs="24" :sm="12" :md="8">
                         <a-form-item label="Brand">
                             <a-select v-model:value="formData.clearcote.brand">
                                 <a-select-option value="Chrome">Chrome</a-select-option>
@@ -295,44 +293,44 @@ const handleSave = async () => {
                     </a-col>
                 </a-row>
                 <a-row :gutter="16">
-                    <a-col :span="8">
+                    <a-col :xs="24" :sm="12" :md="8">
                         <a-form-item label="timezone（空=不强制）">
                             <a-input v-model:value="formData.clearcote.timezone" placeholder="Asia/Shanghai" />
                         </a-form-item>
                     </a-col>
-                    <a-col :span="8">
+                    <a-col :xs="24" :sm="12" :md="8">
                         <a-form-item label="acceptLanguage（空=不强制）">
                             <a-input v-model:value="formData.clearcote.acceptLanguage" placeholder="zh-CN,zh" />
                         </a-form-item>
                     </a-col>
-                    <a-col :span="8">
+                    <a-col :xs="24" :sm="12" :md="8">
                         <a-form-item label="webrtcIp（空=不强制）">
                             <a-input v-model:value="formData.clearcote.webrtcIp" placeholder="203.0.113.10" />
                         </a-form-item>
                     </a-col>
                 </a-row>
                 <a-row :gutter="16">
-                    <a-col :span="8">
+                    <a-col :xs="24" :sm="12" :md="8">
                         <a-form-item label="fingerprintProfile 文件路径（空=用持久 seed；配置后与 seed 互斥）">
                             <a-input v-model:value="formData.clearcote.fingerprintProfile" />
                         </a-form-item>
                     </a-col>
-                    <a-col :span="4">
+                    <a-col :xs="24" :sm="12" :md="4">
                         <a-form-item label="GeoIP 对齐">
                             <a-switch v-model:checked="formData.clearcote.geoip" />
                         </a-form-item>
                     </a-col>
-                    <a-col :span="4">
+                    <a-col :xs="24" :sm="12" :md="4">
                         <a-form-item label="原生 humanize">
                             <a-switch v-model:checked="formData.clearcote.humanize" />
                         </a-form-item>
                     </a-col>
-                    <a-col :span="4">
+                    <a-col :xs="24" :sm="12" :md="4">
                         <a-form-item label="sandbox（关闭降安全）">
                             <a-switch v-model:checked="formData.clearcote.sandbox" />
                         </a-form-item>
                     </a-col>
-                    <a-col :span="4">
+                    <a-col :xs="24" :sm="12" :md="4">
                         <a-form-item label="允许检测到的 license">
                             <a-switch v-model:checked="formData.clearcote.allowDetectedLicense" />
                         </a-form-item>
@@ -349,17 +347,17 @@ const handleSave = async () => {
 
         <a-card title="CSS 性能注入" :bordered="false" class="sec">
             <a-row :gutter="16">
-                <a-col :span="8">
+                <a-col :xs="24" :sm="12" :md="8">
                     <a-form-item label="禁用动画">
                         <a-switch v-model:checked="formData.cssAnimation" />
                     </a-form-item>
                 </a-col>
-                <a-col :span="8">
+                <a-col :xs="24" :sm="12" :md="8">
                     <a-form-item label="禁用滤镜/阴影">
                         <a-switch v-model:checked="formData.cssFilter" />
                     </a-form-item>
                 </a-col>
-                <a-col :span="8">
+                <a-col :xs="24" :sm="12" :md="8">
                     <a-form-item label="字体极速渲染（高指纹风险）">
                         <a-switch v-model:checked="formData.cssFont" />
                     </a-form-item>
@@ -370,12 +368,12 @@ const handleSave = async () => {
         <a-card title="全局代理" :bordered="false" class="sec">
             <a-form layout="vertical">
                 <a-row :gutter="16">
-                    <a-col :span="4">
+                    <a-col :xs="24" :sm="12" :md="4">
                         <a-form-item label="启用">
                             <a-switch v-model:checked="formData.proxyEnable" />
                         </a-form-item>
                     </a-col>
-                    <a-col :span="4">
+                    <a-col :xs="24" :sm="12" :md="4">
                         <a-form-item label="类型">
                             <a-select v-model:value="formData.proxyType">
                                 <a-select-option value="http">http</a-select-option>
@@ -383,29 +381,29 @@ const handleSave = async () => {
                             </a-select>
                         </a-form-item>
                     </a-col>
-                    <a-col :span="8">
+                    <a-col :xs="24" :sm="12" :md="8">
                         <a-form-item label="主机">
                             <a-input v-model:value="formData.proxyHost" />
                         </a-form-item>
                     </a-col>
-                    <a-col :span="4">
+                    <a-col :xs="24" :sm="12" :md="4">
                         <a-form-item label="端口">
                             <a-input-number v-model:value="formData.proxyPort" :min="1" :max="65535" style="width:100%" />
                         </a-form-item>
                     </a-col>
-                    <a-col :span="4">
+                    <a-col :xs="24" :sm="12" :md="4">
                         <a-form-item label="需要认证">
                             <a-switch v-model:checked="formData.proxyAuth" />
                         </a-form-item>
                     </a-col>
                 </a-row>
                 <a-row v-if="formData.proxyAuth" :gutter="16">
-                    <a-col :span="12">
+                    <a-col :xs="24" :sm="12" :md="12">
                         <a-form-item label="用户名">
                             <a-input v-model:value="formData.proxyUser" />
                         </a-form-item>
                     </a-col>
-                    <a-col :span="12">
+                    <a-col :xs="24" :sm="12" :md="12">
                         <a-form-item label="密码">
                             <a-input-password v-model:value="formData.proxyPasswd" />
                         </a-form-item>

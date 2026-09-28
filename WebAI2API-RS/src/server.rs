@@ -755,16 +755,7 @@ async fn runtime_status(state: &AppState) -> Response {
     // 与 Node 原版对齐：runtime 字段名改为 instance/runtime/stopped，去掉桥内部字段
     let workers = workers_arr
         .iter()
-        .map(|w| {
-            json!({
-                "name": w["name"],
-                "instance": w["instance"],
-                "engine": w["engine"],
-                "userDataDir": w["userDataDir"],
-                "stopped": w["stopped"],
-                "runtime": w["runtime"]
-            })
-        })
+        .map(runtime_status_worker_view)
         .collect::<Vec<_>>();
     json_response(
         200,
@@ -796,7 +787,7 @@ async fn runtime_status(state: &AppState) -> Response {
             "browser": {
                 "defaultEngine": typed.browser_engine(),
                 "engines": engines,
-                "clearcoteSdk": if typed.browser_engine() == "clearcote" {
+                "clearcoteSdk": if engines.iter().any(|engine| engine == "clearcote") {
                     read_clearcote_sdk_version()
                 } else { json!(null) },
                 "userStopped": browser_stopped,
@@ -806,6 +797,18 @@ async fn runtime_status(state: &AppState) -> Response {
             "timestamp": chrono::Utc::now().to_rfc3339(),
         }),
     )
+}
+
+fn runtime_status_worker_view(worker: &Value) -> Value {
+    json!({
+        "name": worker["name"],
+        "instance": worker["instance"],
+        "engine": worker["engine"],
+        "userDataDir": worker["userDataDir"],
+        "pageReady": worker.get("pageReady").and_then(Value::as_bool).unwrap_or(false),
+        "stopped": worker["stopped"],
+        "runtime": worker["runtime"]
+    })
 }
 
 async fn auth_status(state: &AppState) -> Response {
@@ -1067,16 +1070,28 @@ async fn admin(
                 &names,
             ))
         }
-        ("GET", "/config/server") => json_response(200, server_config_view(&state.config)),
-        ("GET", "/config/browser") => json_response(200, browser_config_view(&state.config)),
+        ("GET", "/config/server") => {
+            persisted_config_response(state, |saved| {
+                let active_auth = config::auth_of(&state.config);
+                let auth_pending_restart = config::auth_of(saved) != active_auth;
+                let mut view = server_config_view(saved);
+                view["authToken"] = json!(active_auth);
+                view["authTokenPendingRestart"] = json!(auth_pending_restart);
+                view
+            })
+            .await
+        }
+        ("GET", "/config/browser") => persisted_config_response(state, browser_config_view).await,
         ("GET", "/config/instances") | ("GET", "/config/workers") => {
-            json_response(200, instances_config_view(&state.config))
+            persisted_config_response(state, instances_config_view).await
         }
         ("GET", "/config/adapters") => {
-            let typed = crate::typed::Config::from_value(&state.config);
-            json_response(200, Value::Object(typed.backend.adapter))
+            persisted_config_response(state, |config| {
+                Value::Object(crate::typed::Config::from_value(config).backend.adapter)
+            })
+            .await
         }
-        ("GET", "/config/pool") => json_response(200, pool_config_view(&state.config)),
+        ("GET", "/config/pool") => persisted_config_response(state, pool_config_view).await,
         ("POST", p) if p.starts_with("/config/") => save_config(state, p, body).await,
         ("GET", "/adapters") => match state.bridge.list_adapters().await {
             Ok(v) => json_response(200, adapters_meta(&v, &state.config)),
@@ -1465,11 +1480,7 @@ async fn stats_range(query: &str, clear: bool) -> Response {
 async fn save_config(state: &AppState, path: &str, body: &[u8]) -> Response {
     // Serialize the complete read/merge/validate/write transaction. Acquiring this
     // before reading prevents concurrent patches from overwriting one another.
-    static CONFIG_SAVE: OnceLock<Arc<tokio::sync::Mutex<()>>> = OnceLock::new();
-    let save_lock = CONFIG_SAVE
-        .get_or_init(|| Arc::new(tokio::sync::Mutex::new(())))
-        .clone();
-    let _guard = save_lock.lock_owned().await;
+    let _guard = config_save_lock().lock_owned().await;
     let section = path.trim_start_matches("/config/");
     let patch: Value = match serde_json::from_slice(body) {
         Ok(v) => v,
@@ -1629,6 +1640,30 @@ async fn save_config(state: &AppState, path: &str, body: &[u8]) -> Response {
 
 fn config_tmp_path(cfg_path: &Path) -> PathBuf {
     PathBuf::from(format!("{}.tmp", cfg_path.display()))
+}
+
+fn config_save_lock() -> Arc<tokio::sync::Mutex<()>> {
+    static CONFIG_SAVE: OnceLock<Arc<tokio::sync::Mutex<()>>> = OnceLock::new();
+    CONFIG_SAVE
+        .get_or_init(|| Arc::new(tokio::sync::Mutex::new(())))
+        .clone()
+}
+
+async fn read_persisted_config(config_path: PathBuf) -> Result<Value, ConfigError> {
+    let _guard = config_save_lock().lock_owned().await;
+    tokio::task::spawn_blocking(move || config::read_config_file(&config_path))
+        .await
+        .map_err(|e| ConfigError(format!("读取配置任务失败: {e}")))?
+}
+
+async fn persisted_config_response(
+    state: &AppState,
+    view: impl FnOnce(&Value) -> Value,
+) -> Response {
+    match read_persisted_config(state.config_path.clone()).await {
+        Ok(config) => json_response(200, view(&config)),
+        Err(e) => api_error("INTERNAL_ERROR", Some(&e.to_string()), None, false),
+    }
 }
 
 // ==================== 与 WebUI 对齐的视图 ====================
@@ -2099,5 +2134,74 @@ mod tests {
         assert_eq!(providers.len(), 1);
         assert_eq!(providers[0]["status"], "active");
         assert_eq!(providers[0]["runningWorkers"], 1);
+    }
+
+    #[test]
+    fn referenced_engines_include_worker_engine_overrides() {
+        let config = json!({
+            "browser": { "engine": "camoufox" },
+            "backend": {
+                "pool": {
+                    "workers": [{ "name": "clearcote-worker", "engine": "clearcote" }]
+                }
+            }
+        });
+
+        assert_eq!(
+            referenced_engine_names(&config),
+            vec!["camoufox", "clearcote"]
+        );
+    }
+
+    #[test]
+    fn runtime_status_worker_view_preserves_not_ready_state() {
+        let view = runtime_status_worker_view(&json!({
+            "name": "recovering-worker",
+            "instance": "main",
+            "engine": "camoufox",
+            "pageReady": false,
+            "stopped": false,
+            "runtime": { "version": "1.2.3", "versionVerified": false }
+        }));
+
+        assert_eq!(view["pageReady"], false);
+        assert_eq!(view["stopped"], false);
+    }
+
+    #[tokio::test]
+    async fn persisted_config_read_waits_for_save_rollback() {
+        let path = std::env::temp_dir().join(format!(
+            "webai2api-save-read-lock-{}-{}.yaml",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::write(&path, "value: original\n").unwrap();
+
+        let save_guard = config_save_lock().lock_owned().await;
+        let read_path = path.clone();
+        let (started_tx, started_rx) = tokio::sync::oneshot::channel();
+        let reader = tokio::spawn(async move {
+            let _ = started_tx.send(());
+            read_persisted_config(read_path).await
+        });
+        started_rx.await.unwrap();
+        tokio::task::yield_now().await;
+        assert!(
+            !reader.is_finished(),
+            "persisted GET must wait for save lock"
+        );
+
+        // Simulate a candidate rename followed by validation rollback. The GET must see
+        // only the restored config after the transaction releases its lock.
+        std::fs::write(&path, "value: [invalid\n").unwrap();
+        std::fs::write(&path, "value: restored\n").unwrap();
+        drop(save_guard);
+
+        let read = reader.await.unwrap().unwrap();
+        assert_eq!(read["value"], "restored");
+        let _ = std::fs::remove_file(path);
     }
 }

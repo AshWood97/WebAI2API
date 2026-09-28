@@ -88,6 +88,7 @@ export function createOpenAIRouter(context) {
             instance: w.instanceName || null,
             engine: w.engine || normalizeEngine(config?.browser?.engine),
             userDataDir: w.userDataDir || null,
+            pageReady: !!w.page,
             stopped: w.initialized === false,
             runtime: w.runtime || null
         }));
