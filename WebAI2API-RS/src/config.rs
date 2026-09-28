@@ -175,16 +175,22 @@ pub fn load_config(root: &Path) -> Result<Value, ConfigError> {
     load_config_in(root, &root.join("data"))
 }
 
-pub fn load_config_in(root: &Path, data_dir: &Path) -> Result<Value, ConfigError> {
-    let path = resolve_config_path_in(root, data_dir)?;
-    let text = fs::read_to_string(&path).map_err(|e| ConfigError(format!("读取配置失败: {e}")))?;
+/// 只解析配置文件内容，不补默认值或初始化运行时状态。
+pub fn read_config_file(path: &Path) -> Result<Value, ConfigError> {
+    let text = fs::read_to_string(path).map_err(|e| ConfigError(format!("读取配置失败: {e}")))?;
     let yaml_value: serde_yaml::Value = serde_yaml::from_str(&text)
         .map_err(|e| ConfigError(format!("配置文件解析失败: {path:?}: {e}")))?;
-    let mut config: Value =
+    let config: Value =
         serde_json::to_value(&yaml_value).map_err(|e| ConfigError(format!("配置转换失败: {e}")))?;
     if !config.is_object() {
         return Err(ConfigError(format!("配置文件解析失败: {}", path.display())));
     }
+    Ok(config)
+}
+
+pub fn load_config_in(root: &Path, data_dir: &Path) -> Result<Value, ConfigError> {
+    let path = resolve_config_path_in(root, data_dir)?;
+    let mut config = read_config_file(&path)?;
 
     // Docker 路径兼容
     let browser_path = config

@@ -275,8 +275,13 @@ export function createAdminRouter(context) {
                 if (method === 'GET') {
                     const serverConfig = getServerConfig();
                     const queueConfig = getQueueConfig();
+                    const activeAuthToken = config.server?.auth || '';
                     sendJson(res, 200, {
                         ...serverConfig,
+                        // The service still authenticates with startup configuration until restart.
+                        // Never expose a pending token saved to disk through the admin GET response.
+                        authToken: activeAuthToken,
+                        authTokenPendingRestart: serverConfig.authToken !== activeAuthToken,
                         queueBuffer: queueConfig.queueBuffer,
                         imageLimit: queueConfig.imageLimit
                     });

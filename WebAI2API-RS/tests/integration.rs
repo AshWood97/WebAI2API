@@ -119,10 +119,35 @@ async fn get(port: u16, path: &str) -> (u16, Value) {
     (status, body)
 }
 
+async fn get_with_auth(port: u16, path: &str, token: &str) -> (u16, Value) {
+    let resp = reqwest::Client::new()
+        .get(format!("http://127.0.0.1:{port}{path}"))
+        .bearer_auth(token)
+        .send()
+        .await
+        .unwrap_or_else(|e| panic!("GET {path} 失败: {e}"));
+    let status = resp.status().as_u16();
+    let body: Value = resp.json().await.unwrap_or(Value::Null);
+    (status, body)
+}
+
 async fn post(port: u16, path: &str, body: Value) -> (u16, Value) {
     let client = reqwest::Client::new();
     let resp = client
         .post(format!("http://127.0.0.1:{port}{path}"))
+        .json(&body)
+        .send()
+        .await
+        .unwrap_or_else(|e| panic!("POST {path} 失败: {e}"));
+    let status = resp.status().as_u16();
+    let body: Value = resp.json().await.unwrap_or(Value::Null);
+    (status, body)
+}
+
+async fn post_with_auth(port: u16, path: &str, token: &str, body: Value) -> (u16, Value) {
+    let resp = reqwest::Client::new()
+        .post(format!("http://127.0.0.1:{port}{path}"))
+        .bearer_auth(token)
         .json(&body)
         .send()
         .await
@@ -653,6 +678,164 @@ async fn concurrent_config_patches_preserve_both_updates() {
     );
 
     handle.shutdown().await;
+    let _ = std::fs::remove_dir_all(&cfg);
+    let _ = std::fs::remove_dir_all(&data);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn saved_config_get_reflects_disk_without_reloading_runtime() {
+    let _serial = SERIAL.lock().await;
+    let cfg = temp_dir("cfg-get-saved");
+    let data = temp_dir("data-get-saved");
+    let port = free_port();
+    let initial_config = format!(
+        concat!(
+            "server:\n",
+            "  port: {}\n",
+            "  auth: \"\"\n",
+            "browser:\n",
+            "  engine: camoufox\n",
+            "  clearcote:\n",
+            "    acceptLanguage: \"en-US,en\"\n",
+            "backend:\n",
+            "  pool:\n",
+            "    strategy: least_busy\n",
+            "    instances:\n",
+            "      - name: main\n",
+            "        workers:\n",
+            "          - name: w\n",
+            "            type: mock\n",
+        ),
+        port
+    );
+    write_config(&data, &initial_config);
+
+    let handle = run::supervise(base_opts(&cfg, &data)).await;
+    wait_ready(port).await;
+
+    let (status, browser_save) = post(
+        port,
+        "/admin/config/browser",
+        serde_json::json!({
+            "engine": "clearcote",
+            "clearcote": { "acceptLanguage": "zh-CN,zh" }
+        }),
+    )
+    .await;
+    assert_eq!(status, 200, "{browser_save}");
+    let (status, server_save) = post(
+        port,
+        "/admin/config/server",
+        serde_json::json!({"queueBuffer": 9}),
+    )
+    .await;
+    assert_eq!(status, 200, "{server_save}");
+    let (status, instances_save) = post(
+        port,
+        "/admin/config/instances",
+        serde_json::json!([{
+            "name": "saved-instance",
+            "engine": "clearcote",
+            "workers": [{"name": "saved-worker", "type": "lmarena"}]
+        }]),
+    )
+    .await;
+    assert_eq!(status, 200, "{instances_save}");
+    let (status, adapters_save) = post(
+        port,
+        "/admin/config/adapters",
+        serde_json::json!({"saved-adapter": {"custom": "persisted"}}),
+    )
+    .await;
+    assert_eq!(status, 200, "{adapters_save}");
+    let (status, pool_save) = post(
+        port,
+        "/admin/config/pool",
+        serde_json::json!({"strategy": "round_robin"}),
+    )
+    .await;
+    assert_eq!(status, 200, "{pool_save}");
+
+    let (status, server) = get(port, "/admin/config/server").await;
+    assert_eq!(status, 200, "{server}");
+    assert_eq!(server["queueBuffer"], 9);
+
+    let (status, browser) = get(port, "/admin/config/browser").await;
+    assert_eq!(status, 200, "{browser}");
+    assert_eq!(browser["engine"], "clearcote");
+    assert_eq!(browser["clearcote"]["acceptLanguage"], "zh-CN,zh");
+
+    let (status, instances) = get(port, "/admin/config/instances").await;
+    assert_eq!(status, 200, "{instances}");
+    assert_eq!(instances[0]["name"], "saved-instance");
+
+    let (status, workers) = get(port, "/admin/config/workers").await;
+    assert_eq!(status, 200, "{workers}");
+    assert_eq!(workers[0]["workers"][0]["name"], "saved-worker");
+
+    let (status, adapters) = get(port, "/admin/config/adapters").await;
+    assert_eq!(status, 200, "{adapters}");
+    assert_eq!(adapters["saved-adapter"]["custom"], "persisted");
+
+    let (status, pool) = get(port, "/admin/config/pool").await;
+    assert_eq!(status, 200, "{pool}");
+    assert_eq!(pool["strategy"], "round_robin");
+
+    let (status, runtime) = get(port, "/v1/runtime/status").await;
+    assert_eq!(status, 200, "{runtime}");
+    assert_eq!(runtime["browser"]["defaultEngine"], "camoufox");
+    assert_eq!(runtime["pool"]["strategy"], "least_busy");
+    assert_eq!(runtime["pool"]["workerCount"], 1);
+    assert!(runtime["browser"]["workers"][0]["pageReady"].is_boolean());
+    assert_ne!(runtime["browser"]["workers"][0]["name"], "saved-worker");
+
+    handle.shutdown().await;
+    let _ = std::fs::remove_dir_all(&cfg);
+    let _ = std::fs::remove_dir_all(&data);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn pending_auth_token_is_hidden_until_restart_then_rotates() {
+    let _serial = SERIAL.lock().await;
+    let cfg = temp_dir("cfg-auth-pending");
+    let data = temp_dir("data-auth-pending");
+    let port = free_port();
+    let initial_config = single_worker_config(port, &worker_tag(port))
+        .replace("auth: \"\"", "auth: active-old-token");
+    write_config(&data, &initial_config);
+
+    let opts = base_opts(&cfg, &data);
+    let handle = run::supervise(opts.clone()).await;
+    wait_ready(port).await;
+
+    let (status, saved) = post_with_auth(
+        port,
+        "/admin/config/server",
+        "active-old-token",
+        serde_json::json!({"authToken": "pending-new-token"}),
+    )
+    .await;
+    assert_eq!(status, 200, "{saved}");
+
+    let (status, server) = get_with_auth(port, "/admin/config/server", "active-old-token").await;
+    assert_eq!(status, 200, "{server}");
+    assert_eq!(server["authToken"], "active-old-token");
+    assert_eq!(server["authTokenPendingRestart"], true);
+    assert!(!server.to_string().contains("pending-new-token"));
+    let (status, _) = get_with_auth(port, "/admin/config/server", "pending-new-token").await;
+    assert_eq!(status, 401);
+
+    handle.shutdown().await;
+    let restarted = run::supervise(opts).await;
+    wait_ready(port).await;
+    let (status, _) = get_with_auth(port, "/admin/config/server", "active-old-token").await;
+    assert_eq!(status, 401);
+    let (status, server) = get_with_auth(port, "/admin/config/server", "pending-new-token").await;
+    assert_eq!(status, 200, "{server}");
+    assert_eq!(server["authToken"], "pending-new-token");
+    assert_eq!(server["authTokenPendingRestart"], false);
+
+    restarted.shutdown().await;
     let _ = std::fs::remove_dir_all(&cfg);
     let _ = std::fs::remove_dir_all(&data);
 }

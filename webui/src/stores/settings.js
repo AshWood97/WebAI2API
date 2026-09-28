@@ -60,7 +60,7 @@ export const useSettingsStore = defineStore('settings', {
             }
 
             if (res.ok) {
-                if (successMsg) message.success(successMsg);
+                if (successMsg) message.success(data.message || successMsg);
                 return { success: true, data };
             } else {
                 console.error('Request failed:', res.status, data);
@@ -85,6 +85,7 @@ export const useSettingsStore = defineStore('settings', {
             }
         },
         async saveServerConfig(config) {
+            const activeAuthToken = this.serverConfig?.authToken ?? config.authToken ?? '';
             try {
                 const res = await fetch('/admin/config/server', {
                     method: 'POST',
@@ -93,7 +94,15 @@ export const useSettingsStore = defineStore('settings', {
                 });
                 const result = await this.handleResponse(res, '服务器设置保存成功');
                 if (result.success) {
-                    this.serverConfig = config;
+                    const includesAuthToken = Object.prototype.hasOwnProperty.call(config, 'authToken');
+                    this.serverConfig = {
+                        ...this.serverConfig,
+                        ...config,
+                        authToken: activeAuthToken,
+                        authTokenPendingRestart: includesAuthToken
+                            ? config.authToken !== activeAuthToken
+                            : this.serverConfig?.authTokenPendingRestart === true
+                    };
                     return true;
                 }
             } catch (e) {
@@ -118,7 +127,7 @@ export const useSettingsStore = defineStore('settings', {
                     headers: this.getHeaders(),
                     body: JSON.stringify(config)
                 });
-                const result = await this.handleResponse(res, '浏览器设置保存成功');
+                const result = await this.handleResponse(res, '浏览器配置已保存，重启服务后生效');
                 if (result.success) {
                     this.browserConfig = config;
                     return true;

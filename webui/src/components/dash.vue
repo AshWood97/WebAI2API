@@ -95,6 +95,20 @@ const providerStatusColor = (status) => {
     return 'default';
 };
 
+const formatWorkerRuntime = (runtime) => {
+    if (!runtime) return '运行时未知';
+    const details = [];
+    const browserVersion = runtime.versionVerified === false
+        ? null
+        : (runtime.browserVersion || runtime.version);
+    const sdkVersion = runtime.sdkVersion || runtime.sdk;
+    if (browserVersion) details.push(`浏览器 ${browserVersion}`);
+    if (sdkVersion) details.push(`SDK ${sdkVersion}`);
+    if (details.length === 0 && runtime.release) details.push(runtime.release);
+    if (details.length === 0) details.push(runtime.engine || '已启动');
+    return details.join(' · ');
+};
+
 const formatUptime = (seconds) => {
     const d = Math.floor(seconds / (3600 * 24));
     const h = Math.floor((seconds % (3600 * 24)) / 3600);
@@ -285,20 +299,23 @@ onUnmounted(() => {
                         <BookOutlined /> API 文档
                     </a-button>
                 </div>
-                <div v-if="runtimeInfo?.camoufox" style="font-size: 12px; color: #8c8c8c;">
-                    Camoufox 内核：{{ runtimeInfo.camoufox.full || runtimeInfo.camoufox.version }}
-                    · 引擎 {{ runtimeInfo.browser?.defaultEngine || 'camoufox' }}
-                    <template v-if="runtimeInfo.browser?.engines?.length">
-                        （配置: {{ runtimeInfo.browser.engines.join(' + ') }}）
-                    </template>
-                    · 状态 {{ runtimeInfo.status }} · 模型 {{ runtimeInfo.models?.count ?? 0 }}
-                </div>
-                <div v-else-if="runtimeInfo?.browser" style="font-size: 12px; color: #8c8c8c;">
-                    引擎 {{ runtimeInfo.browser.defaultEngine }}
-                    <template v-if="runtimeInfo.browser?.engines?.length">
-                        （配置: {{ runtimeInfo.browser.engines.join(' + ') }}）
-                    </template>
-                    · 状态 {{ runtimeInfo.status }} · 模型 {{ runtimeInfo.models?.count ?? 0 }}
+                <div v-if="runtimeInfo?.browser || runtimeInfo?.camoufox" style="font-size: 12px; color: #8c8c8c;">
+                    <div v-if="runtimeInfo.camoufox">
+                        已安装 Camoufox 内核：{{ runtimeInfo.camoufox.full || runtimeInfo.camoufox.version }}
+                    </div>
+                    <div v-if="runtimeInfo.browser">
+                        默认配置引擎 {{ runtimeInfo.browser.defaultEngine || 'camoufox' }}
+                        <template v-if="runtimeInfo.browser.engines?.length">
+                            · 配置引用引擎 {{ runtimeInfo.browser.engines.join(' + ') }}
+                        </template>
+                        · 状态 {{ runtimeInfo.status }} · 模型 {{ runtimeInfo.models?.count ?? 0 }}
+                    </div>
+                    <div v-for="worker in (runtimeInfo.browser?.workers || [])" :key="worker.name || worker.instance">
+                        Worker {{ worker.name || worker.instance || 'unknown' }}
+                        · 引擎 {{ worker.engine || worker.runtime?.engine || runtimeInfo.browser?.defaultEngine || 'unknown' }}
+                        · {{ worker.stopped ? '已停止' : (worker.pageReady === true ? '运行中' : '未就绪/恢复中') }}
+                        · {{ formatWorkerRuntime(worker.runtime) }}
+                    </div>
                 </div>
             </a-space>
         </a-card>
